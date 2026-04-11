@@ -1,14 +1,15 @@
 use axum::{
-    routing::post,
-    Router, Form, response::Html,
+    response::Html,
+    routing::{get, post},
+    Form, Router,
 };
-use serde::{Deserialize, Serialize};
+use base64::prelude::*;
+use serde::Deserialize;
 use serde_json::json;
 use std::process::{Command, Stdio};
-use tower_http::cors::CorsLayer;
-use base64::prelude::*;
-use std::io::Write;
+use std::{fs, io::Write};
 use tempfile::NamedTempFile;
+use tower_http::cors::CorsLayer;
 
 #[derive(Deserialize)]
 struct SynthesizeRequest {
@@ -48,9 +49,10 @@ async fn main() {
         .route("/synthesize", post(synthesize))
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
+        .route("/", get(home))
         .layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:2026").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:2026").await.unwrap();
     println!("Server launched. Listening on http://127.0.0.1:2026");
     axum::serve(listener, app).await.unwrap();
 }
@@ -71,24 +73,47 @@ async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
         .expect("Failed to spawn piper-tts");
 
     if let Some(mut stdin) = child.stdin.take() {
-        // piper-tts processes text line-by-line. We replace newlines with spaces 
-        // to ensure the entire block of text is submitted as a single sequence.
-        let single_line_text = payload.text.replace("\n", " ");
-        stdin.write_all(single_line_text.as_bytes()).expect("Failed to write to stdin");
+        // Strip basic markdown syntax from LLM output so Piper TTS doesn't read the asterisks/hashes out loud
+        let mut clean_text = payload.text;
+
+        // 1. Remove large code blocks
+        let re_code = regex::Regex::new(r"```[\s\S]*?```").unwrap();
+        clean_text = re_code.replace_all(&clean_text, "").to_string();
+
+        // 2. Remove inline code
+        let re_inline_code = regex::Regex::new(r"`[^`]*`").unwrap();
+        clean_text = re_inline_code.replace_all(&clean_text, "").to_string();
+
+        // 3. Remove bold/italics
+        let re_bold_italic = regex::Regex::new(r"(\*\*|__|\*|_)").unwrap();
+        clean_text = re_bold_italic.replace_all(&clean_text, "").to_string();
+
+        // 4. Remove headers
+        let re_header = regex::Regex::new(r"(?m)^#+\s*").unwrap();
+        clean_text = re_header.replace_all(&clean_text, "").to_string();
+
+        // 5. Replace newlines with spaces to ensure piper-tts processes text as a single sequence
+        let single_line_text = clean_text.replace("\n", " ");
+
+        stdin
+            .write_all(single_line_text.as_bytes())
+            .expect("Failed to write to stdin");
     }
 
     let output = child.wait_with_output().expect("Failed to read stdout");
-    
+
     if !output.status.success() {
         eprintln!("piper-tts failed with status: {}", output.status);
         if let Ok(err_str) = String::from_utf8(output.stderr) {
             eprintln!("piper-tts stderr: {}", err_str);
         }
-        return Html(String::from("<span style='color:red;'>Failed to generate audio transmission.</span>"));
+        return Html(String::from(
+            "<span style='color:red;'>Failed to generate audio transmission.</span>",
+        ));
     }
 
     let b64 = BASE64_STANDARD.encode(&output.stdout);
-    
+
     let html = format!(
         r#"<audio controls autoplay style="width:100%; height: 40px;" src="data:audio/wav;base64,{}"></audio>"#,
         b64
@@ -162,10 +187,15 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
     // 4. Return the transcribed text
     if output.status.success() {
         let text = String::from_utf8_lossy(&output.stdout).to_string();
-        
+
         // Strip voxtype stdout logs which end with an empty double newline "\n\n"
-        let clean_text = text.split("\n\n").last().unwrap_or(&text).trim().to_string();
-        
+        let clean_text = text
+            .split("\n\n")
+            .last()
+            .unwrap_or(&text)
+            .trim()
+            .to_string();
+
         Html(clean_text)
     } else {
         eprintln!("voxtype failed with status: {}", output.status);
@@ -183,11 +213,17 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
 
     let client = reqwest::Client::new();
     let request_body = json!({
-        "model": "qwen/qwen3-vl-4b",
+        // "model": "qwen/qwen3-vl-4b",
+        "model": "liquid/lfm2.5-1.2b",
         "messages": [
             {
                 "role": "system",
-                "content": "You are a concise, highly efficient, and direct AI assistant, inspired by sleek futuristic interfaces like Grok and SpaceX. Respond with crisp, accurate information without run-on sentences or unnecessary filler."
+                "content": "You are a concise, highly efficient, and direct AI
+                    assistant, inspired by sleek futuristic interfaces like 
+                    Grok and SpaceX. Respond with crisp, accurate information 
+                    without run-on sentences or unnecessary filler. note: your 
+                    response is going to be read outloud by a text to speech model, 
+                    so no emojis or markdown respond in a way that a text to speech model can read."
             },
             {
                 "role": "user",
@@ -219,6 +255,20 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
         Err(e) => {
             eprintln!("Reqwest error calling LMStudio: {}", e);
             Html(String::from("Error connecting to AI Server."))
+        }
+    }
+}
+
+async fn home() -> Html<String> {
+    let home_page =
+        fs::read_to_string("/home/goitseone/Projects/project-asteria/wraith/src/index.html");
+    match home_page {
+        Ok(page) => {
+            return Html(String::from(page));
+        }
+        Err(err) => {
+            println!("Error reading index.html : {err}");
+            return Html(String::from("File not found :("));
         }
     }
 }
