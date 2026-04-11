@@ -1633,22 +1633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "voice-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower-http",
- "uuid",
-]
-
-[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2165,6 +2149,22 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "wraith"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower-http",
+ "uuid",
 ]
 
 [[package]]
