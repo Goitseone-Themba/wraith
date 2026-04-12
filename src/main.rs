@@ -1,14 +1,19 @@
+#[cfg(test)]
+mod tests;
+
 use axum::{
     response::Html,
     routing::{get, post},
     Form, Router,
 };
+use axum_server::tls_rustls::RustlsConfig;
 use base64::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::process::{Command, Stdio};
-use std::{fs, io::Write};
+use std::{fs, io::Write, net::SocketAddr};
 use tempfile::NamedTempFile;
+use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
 #[derive(Deserialize)]
@@ -41,20 +46,80 @@ struct LmStudioMessage {
     content: String,
 }
 
-#[tokio::main]
-async fn main() {
+fn create_app() -> Router {
     let cors = CorsLayer::permissive();
-
-    let app = Router::new()
+    Router::new()
         .route("/synthesize", post(synthesize))
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
         .route("/", get(home))
-        .layer(cors);
+        .layer(cors)
+}
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:2026").await.unwrap();
-    println!("Server launched. Listening on http://127.0.0.1:2026");
+async fn serve_http(addr: SocketAddr, app: Router) {
+    let listener = TcpListener::bind(addr).await.unwrap();
+    println!("HTTP server launched. Listening on http://{addr}");
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
+    println!("HTTPS server launched. Listening on https://{addr}");
+    let service = app.into_make_service();
+    axum_server::bind_rustls(addr, tls_config)
+        .serve(service)
+        .await
+        .unwrap();
+}
+
+#[tokio::main]
+async fn main() {
+    let app = create_app();
+    
+    let http_addr: SocketAddr = "0.0.0.0:2026".parse().unwrap();
+    let https_addr: SocketAddr = "0.0.0.0:2027".parse().unwrap();
+    
+    let cert_path = "cert.pem";
+    let key_path = "key.pem";
+    
+    if fs::metadata(cert_path).is_ok() && fs::metadata(key_path).is_ok() {
+        println!("Found TLS certificates, starting HTTPS server...");
+        
+        let tls_config = match RustlsConfig::from_pem_file(cert_path, key_path).await {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to load TLS certificates: {e}");
+                eprintln!("Starting HTTP only...");
+                serve_http(http_addr, app).await;
+                return;
+            }
+        };
+        
+        println!();
+        println!("========================================");
+        println!("WRAITH is running!");
+        println!();
+        println!("  HTTP:  http://127.0.0.1:2026");
+        println!("  HTTPS: https://{}", https_addr);
+        println!();
+        println!("For mobile/remote access, use HTTPS:");
+        println!("  https://YOUR_LAPTOP_IP:2027");
+        println!();
+        println!("Note: You'll need to accept the self-signed");
+        println!("certificate in your browser.");
+        println!("========================================");
+        println!();
+        
+        tokio::spawn(serve_https(https_addr, tls_config, app.clone()));
+        serve_http(http_addr, app).await;
+    } else {
+        println!("No TLS certificates found (cert.pem, key.pem)");
+        println!("Starting HTTP only on http://127.0.0.1:2026");
+        println!();
+        println!("For HTTPS (needed for microphone on mobile), generate certificates:");
+        println!("  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes");
+        println!();
+        serve_http(http_addr, app).await;
+    }
 }
 
 async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {

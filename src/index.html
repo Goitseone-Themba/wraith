@@ -99,6 +99,32 @@
             50% { opacity: 0.4; }
         }
 
+        .https-notice {
+            background: var(--danger-dim);
+            border: 1px solid var(--danger);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            line-height: 1.5;
+            display: none;
+        }
+
+        .https-notice.visible {
+            display: block;
+        }
+
+        .https-notice strong {
+            color: var(--danger);
+        }
+
+        .https-notice code {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+        }
+
         .chat-log {
             flex: 1;
             overflow-y: auto;
@@ -447,6 +473,12 @@
             </div>
         </div>
 
+        <div class="https-notice" id="https-notice">
+            <strong>Microphone access requires HTTPS.</strong><br>
+            For mobile/remote access, use: <code id="https-url">https://YOUR_IP:2027</code><br>
+            <small>Accept the self-signed certificate when prompted.</small>
+        </div>
+
         <div class="chat-log" id="chat-log">
             <div class="message ai">
                 <span class="message-sender">Wraith</span>
@@ -495,8 +527,20 @@
         const transcriptionPreview = document.getElementById('transcription-preview');
         const waveform = document.getElementById('waveform');
         const btnEndCall = document.getElementById('btn-end-call');
+        const httpsNotice = document.getElementById('https-notice');
+        const httpsUrlEl = document.getElementById('https-url');
 
         const baseUrl = window.location.href;
+        
+        const isSecureContext = window.location.protocol === 'https:' || 
+                               window.location.hostname === 'localhost' ||
+                               window.location.hostname === '127.0.0.1';
+        
+        if (!isSecureContext) {
+            const host = window.location.hostname;
+            httpsUrlEl.textContent = `https://${host}:2027`;
+            httpsNotice.classList.add('visible');
+        }
 
         let mediaRecorder;
         let audioChunks = [];
@@ -679,7 +723,12 @@
             let message = 'Microphone error. Please check permissions.';
             
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                message = 'Microphone access denied. Please allow microphone access in your browser settings.';
+                if (!isSecureContext) {
+                    message = 'Microphone requires HTTPS. See banner above for the secure URL.';
+                    httpsNotice.classList.add('visible');
+                } else {
+                    message = 'Microphone access denied. Please allow microphone access in your browser settings.';
+                }
             } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
                 message = 'No microphone found. Please connect a microphone.';
             } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
