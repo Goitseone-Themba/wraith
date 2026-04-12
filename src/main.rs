@@ -13,7 +13,6 @@ use serde_json::json;
 use std::process::{Command, Stdio};
 use std::{fs, io::Write, net::SocketAddr};
 use tempfile::NamedTempFile;
-use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
 #[derive(Deserialize)]
@@ -56,12 +55,6 @@ fn create_app() -> Router {
         .layer(cors)
 }
 
-async fn serve_http(addr: SocketAddr, app: Router) {
-    let listener = TcpListener::bind(addr).await.unwrap();
-    println!("HTTP server launched. Listening on http://{addr}");
-    axum::serve(listener, app).await.unwrap();
-}
-
 async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
     println!("HTTPS server launched. Listening on https://{addr}");
     let service = app.into_make_service();
@@ -75,9 +68,7 @@ async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
 async fn main() {
     let app = create_app();
     
-    let http_addr: SocketAddr = "0.0.0.0:2026".parse().unwrap();
-    let https_addr: SocketAddr = "0.0.0.0:2027".parse().unwrap();
-    
+    let https_addr: SocketAddr = "0.0.0.0:2026".parse().unwrap();
     let cert_path = "cert.pem";
     let key_path = "key.pem";
     
@@ -88,9 +79,8 @@ async fn main() {
             Ok(config) => config,
             Err(e) => {
                 eprintln!("Failed to load TLS certificates: {e}");
-                eprintln!("Starting HTTP only...");
-                serve_http(http_addr, app).await;
-                return;
+                eprintln!("Place cert.pem and key.pem in the project directory.");
+                std::process::exit(1);
             }
         };
         
@@ -98,27 +88,27 @@ async fn main() {
         println!("========================================");
         println!("WRAITH is running!");
         println!();
-        println!("  HTTP:  http://127.0.0.1:2026");
-        println!("  HTTPS: https://{}", https_addr);
+        println!("  HTTPS: https://127.0.0.1:2026");
+        println!("  HTTPS: https://YOUR_IP:2026 (for mobile)");
         println!();
-        println!("For mobile/remote access, use HTTPS:");
-        println!("  https://YOUR_LAPTOP_IP:2027");
-        println!();
-        println!("Note: You'll need to accept the self-signed");
-        println!("certificate in your browser.");
+        println!("Note: Accept the self-signed certificate");
+        println!("warning in your browser.");
         println!("========================================");
         println!();
         
-        tokio::spawn(serve_https(https_addr, tls_config, app.clone()));
-        serve_http(http_addr, app).await;
+        serve_https(https_addr, tls_config, app).await;
     } else {
-        println!("No TLS certificates found (cert.pem, key.pem)");
-        println!("Starting HTTP only on http://127.0.0.1:2026");
         println!();
-        println!("For HTTPS (needed for microphone on mobile), generate certificates:");
-        println!("  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes");
+        println!("TLS certificates not found!");
         println!();
-        serve_http(http_addr, app).await;
+        println!("Generate certificates with:");
+        println!("  openssl req -x509 -newkey rsa:4096 \\");
+        println!("    -keyout key.pem -out cert.pem \\");
+        println!("    -days 365 -nodes");
+        println!();
+        println!("Then run: cargo run --release");
+        println!();
+        std::process::exit(1);
     }
 }
 

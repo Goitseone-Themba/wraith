@@ -60,7 +60,7 @@ sudo apt install ffmpeg
 
 1. Install prerequisites above
 2. Start LM Studio and load your preferred model (defaults to `liquid/lfm2.5-1.2b`)
-3. Generate TLS certificates for HTTPS (required for mobile microphone access):
+3. Generate TLS certificates:
 
 ```bash
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
@@ -72,16 +72,9 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 cargo run --release
 ```
 
-5. Open [http://localhost:2026](http://localhost:2026) in your browser
+5. Open [https://localhost:2026](https://localhost:2026) in your browser (accept the self-signed certificate warning)
 
-## HTTPS / Mobile Access
-
-For microphone access on mobile or remote devices, you must use HTTPS:
-
-- **HTTP**: `http://localhost:2026` (works on localhost)
-- **HTTPS**: `https://YOUR_IP:2027` (for mobile/remote access)
-
-When accessing via IP address, browsers require HTTPS for microphone permissions. The server will show a banner with the HTTPS URL to use.
+6. For mobile access, use `https://YOUR_IP:2026`
 
 ## Directory Structure
 
