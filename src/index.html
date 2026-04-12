@@ -617,10 +617,17 @@
         async function attachMic() {
             try {
                 if (!globalMediaStream) {
-                    globalMediaStream = await navigator.mediaDevices.getUserMedia({
-                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                    });
+                    const constraints = {
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    };
+                    
+                    globalMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
                 }
+                
                 if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioContext.state === 'suspended') await audioContext.resume();
 
@@ -633,7 +640,8 @@
                 }
                 microphoneSource.connect(analyserNode);
 
-                mediaRecorder = new MediaRecorder(globalMediaStream, { mimeType: 'audio/webm' });
+                const mimeType = getSupportedMimeType();
+                mediaRecorder = new MediaRecorder(globalMediaStream, { mimeType });
                 audioChunks = [];
 
                 mediaRecorder.ondataavailable = e => {
@@ -643,8 +651,45 @@
                 return true;
             } catch (err) {
                 console.error('Mic error:', err);
+                handleMicError(err);
                 return false;
             }
+        }
+        
+        function getSupportedMimeType() {
+            const types = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/ogg;codecs=opus',
+                'audio/ogg',
+                'audio/mp4',
+                'audio/wav'
+            ];
+            
+            for (const type of types) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    return type;
+                }
+            }
+            
+            return 'audio/webm';
+        }
+        
+        function handleMicError(err) {
+            let message = 'Microphone error. Please check permissions.';
+            
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                message = 'Microphone access denied. Please allow microphone access in your browser settings.';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                message = 'No microphone found. Please connect a microphone.';
+            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                message = 'Microphone is in use by another application.';
+            } else if (err.name === 'OverconstrainedError') {
+                message = 'Microphone constraints could not be satisfied.';
+            }
+            
+            setStatus(message, false);
+            console.error('Mic error:', err.name, err.message);
         }
 
         function stopMediaRecorder() {
