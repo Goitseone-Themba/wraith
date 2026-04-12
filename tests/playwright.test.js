@@ -10,7 +10,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE_URL = 'http://127.0.0.1:2026';
+const BASE_URL = 'https://127.0.0.1:2026';
 const CHROMIUM_PATH = '/usr/bin/chromium';
 
 let browser;
@@ -70,6 +70,7 @@ async function setupBrowser() {
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
+            '--ignore-certificate-errors', // For self-signed cert
             '--use-fake-ui-for-media-stream', // Auto-grant mic permissions for testing
             '--use-fake-device-for-media-stream',
         ]
@@ -149,9 +150,9 @@ async function testInputArea() {
     // Test 2.4: Voice call button exists
     await assertElementExists('#btn-voice-call', 'Voice call button exists');
     
-    // Test 2.5: System status text
+    // Test 2.5: System status text is empty (cleaned up)
     const systemStatus = await page.$eval('#system-status', el => el.textContent);
-    await assertTrue(systemStatus.includes('Enter to send'), 'System status hints at Enter to send');
+    await assertEquals(systemStatus, '', 'System status is empty (no hints displayed)');
     
     // Test 2.6: Text input placeholder
     const placeholder = await page.$eval('#text-input', el => el.placeholder);
