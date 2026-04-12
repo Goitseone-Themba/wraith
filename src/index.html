@@ -699,6 +699,17 @@
                 const audioB64 = await synthesize(response);
 
                 appendMessage('ai', response, audioB64);
+                
+                if (audioB64) {
+                    const audio = new Audio(`data:audio/wav;base64,${audioB64}`);
+                    currentAudio = audio;
+                    audio.play();
+                    
+                    audio.onended = () => {
+                        currentAudio = null;
+                    };
+                }
+                
                 setStatus('', false);
 
             } catch (err) {
