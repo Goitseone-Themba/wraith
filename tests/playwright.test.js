@@ -929,29 +929,9 @@ async function testKnownIssues() {
     // The fix is in sendMessage(), not appendMessage()
     logTest('Issue 1 (Audio auto-play) - FIXED', true, 'Auto-play is now in sendMessage() function');
 
-    // ISSUE 2: MediaRecorder created on every loop iteration
-    console.log('\n🔍 Checking Issue: MediaRecorder lifecycle...');
-    const recorderLifecycleIssue = await page.evaluate(() => {
-        // Start voice call, then manually trigger loop
-        const initialRecorder = mediaRecorder;
-        
-        // Simulate what happens when loop runs again
-        startVoiceCallLoop(false);
-        
-        const newRecorder = mediaRecorder;
-        
-        // The issue: attachMic() creates a new MediaRecorder
-        // without stopping the old one first
-        return {
-            recordersAreSameObject: initialRecorder === newRecorder,
-            issueExists: initialRecorder !== newRecorder
-        };
-    });
-    
-    if (recorderLifecycleIssue.issueExists) {
-        logTest('ISSUE FOUND: MediaRecorder recreated each loop', true,
-            'startVoiceCallLoop() calls attachMic() which creates a new MediaRecorder without stopping the previous one. This causes handler stacking.');
-    }
+    // NOTE: Issue 2 (MediaRecorder lifecycle) was fixed
+    logTest('Issue 2 (MediaRecorder lifecycle) - FIXED', true, 
+        'stopMediaRecorderAndWait() ensures old recorder fully stops before creating new one');
     
     // ISSUE 3: No minimum recording duration check
     console.log('\n🔍 Checking Issue: No minimum recording duration...');

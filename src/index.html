@@ -702,6 +702,31 @@
                 mediaRecorder.stop();
             }
         }
+        
+        function stopMediaRecorderAndWait() {
+            return new Promise((resolve) => {
+                if (!mediaRecorder) {
+                    resolve();
+                    return;
+                }
+                
+                const state = mediaRecorder.state;
+                if (state === 'inactive') {
+                    resolve();
+                    return;
+                }
+                
+                const previousOnStop = mediaRecorder.onstop;
+                mediaRecorder.onstop = (e) => {
+                    if (previousOnStop) previousOnStop(e);
+                    resolve();
+                };
+                
+                mediaRecorder.stop();
+                
+                setTimeout(() => resolve(), 100);
+            });
+        }
 
         async function transcribe(b64) {
             const params = new URLSearchParams();
@@ -844,7 +869,9 @@
 
         async function startVoiceCallLoop(fromInterruption) {
             isProcessingCallQuery = false;
-            stopMediaRecorder();
+            
+            await stopMediaRecorderAndWait();
+            
             if (analyserNode) analyserNode.disconnect();
             transcriptionPreview.textContent = 'Listening...';
 
@@ -858,6 +885,7 @@
                 return;
             }
 
+            audioChunks = [];
             isRecordingCall = true;
             lastSpeakTimestamp = Date.now();
             mediaRecorder.start();
