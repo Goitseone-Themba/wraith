@@ -1,1 +1,5 @@
 /target
+
+# TLS certificates (generated locally)
+*.pem
+!node_modules/**/*.pem
