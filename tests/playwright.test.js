@@ -987,7 +987,7 @@ async function testKnownIssues() {
         // End call
         endVoiceCall();
         
-        // Check if stream is still active (ISSUE)
+        // Check if stream is still active
         const streamStillActive = globalMediaStream && globalMediaStream.active;
         
         return {
@@ -1000,10 +1000,13 @@ async function testKnownIssues() {
     if (noStreamCleanupIssue.issueExists) {
         logTest('ISSUE FOUND: Media stream not stopped on end', true,
             'globalMediaStream is not stopped when voice call ends. Microphone stays "in use".');
+    } else {
+        logTest('Issue (Media stream cleanup) - FIXED', true, 
+            'endVoiceCall() now stops all tracks, closes audio context, and cleans up properly');
     }
     
-    // ISSUE 6: No microphone permission error handling - FIXED
-    logTest('Issue 6 (Permission error handling) - FIXED', true, 
+    // ISSUE: No microphone permission error handling - FIXED
+    logTest('Issue (Permission error handling) - FIXED', true, 
         'handleMicError() now provides user-friendly messages for permission denials and other errors');
 }
 

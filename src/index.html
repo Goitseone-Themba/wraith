@@ -862,8 +862,37 @@
             isProcessingCallQuery = false;
             btnVoiceCall.classList.remove('active');
             voiceCallUI.classList.remove('active');
+            
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
             stopMediaRecorder();
-            if (vadRafId) cancelAnimationFrame(vadRafId);
+            
+            if (vadRafId) {
+                cancelAnimationFrame(vadRafId);
+                vadRafId = null;
+            }
+            
+            if (analyserNode) {
+                analyserNode.disconnect();
+                analyserNode = null;
+            }
+            
+            if (globalMediaStream) {
+                globalMediaStream.getTracks().forEach(track => track.stop());
+                globalMediaStream = null;
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            
+            microphoneSource = null;
+            mediaRecorder = null;
+            
             setStatus('', false);
         }
 
