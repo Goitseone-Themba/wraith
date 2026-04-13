@@ -9,7 +9,7 @@ Last updated: 2026-04-13
 | 1 | Fix MediaRecorder lifecycle (handler stacking) | ✅ Done | #18 |
 | 2 | Add Android permission handling | ✅ Done | #16 |
 | 3 | Add auto-play to text input mode | ✅ Done | #14 |
-| 4 | Add cleanup on endCall (stop stream, close context) | 🔄 In Progress | |
+| 4 | Add cleanup on endCall (stop stream, close context) | ✅ Done | #2 |
 | 5 | Configuration file (`.wraith.toml` or env vars) | ⬜ Pending | |
 | 6 | Graceful degradation when external tools fail | ⬜ Pending | |
 | 7 | Configurable VAD thresholds | ⬜ Pending | |

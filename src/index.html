@@ -598,6 +598,10 @@
                 progressFill.style.width = '0%';
             });
 
+            audio.addEventListener('pause', () => {
+                playBtn.textContent = '▶';
+            });
+
             playBtn.addEventListener('click', () => {
                 if (currentAudio && currentAudio !== audio) {
                     currentAudio.pause();
@@ -612,6 +616,11 @@
                     playBtn.textContent = '▶';
                 }
             });
+        }
+
+        function resetAllAudioPlayers() {
+            document.querySelectorAll('.play-btn').forEach(b => b.textContent = '▶');
+            document.querySelectorAll('.progress-fill').forEach(p => p.style.width = '0%');
         }
 
         async function attachMic() {
@@ -868,6 +877,7 @@
                 currentAudio = null;
             }
             
+            resetAllAudioPlayers();
             stopMediaRecorder();
             
             if (vadRafId) {
@@ -886,8 +896,9 @@
             }
             
             if (audioContext) {
-                audioContext.close();
+                const ctx = audioContext;
                 audioContext = null;
+                ctx.close().catch(err => console.error('Failed to close audio context:', err));
             }
             
             microphoneSource = null;
@@ -897,9 +908,13 @@
         }
 
         async function startVoiceCallLoop(fromInterruption) {
+            if (!isVoiceCallActive) return;
+            
             isProcessingCallQuery = false;
             
             await stopMediaRecorderAndWait();
+            
+            if (!isVoiceCallActive) return;
             
             if (analyserNode) analyserNode.disconnect();
             transcriptionPreview.textContent = 'Listening...';
@@ -909,7 +924,7 @@
             }
 
             const started = await attachMic();
-            if (!started) {
+            if (!started || !isVoiceCallActive) {
                 endVoiceCall();
                 return;
             }
@@ -975,10 +990,14 @@
             setStatus('Processing...', true);
 
             mediaRecorder.onstop = async () => {
+                if (!isVoiceCallActive) return;
+                
                 const blob = new Blob(audioChunks, { type: 'audio/webm' });
                 const reader = new FileReader();
                 reader.readAsDataURL(blob);
                 reader.onloadend = async () => {
+                    if (!isVoiceCallActive) return;
+                    
                     const b64 = reader.result.split(',')[1];
 
                     const text = await transcribe(b64);
@@ -990,6 +1009,7 @@
                     appendMessage('user', text);
 
                     const response = await chat(text);
+                    if (!isVoiceCallActive) return;
                     if (response.startsWith('Error')) {
                         appendMessage('ai', 'LM Studio connection lost.');
                         startVoiceCallLoop(false);
@@ -999,6 +1019,7 @@
                     appendMessage('ai', response);
                     const audioB64 = await synthesize(response);
 
+                    if (!isVoiceCallActive) return;
                     if (audioB64) {
                         const audio = new Audio(`data:audio/wav;base64,${audioB64}`);
                         currentAudio = audio;
@@ -1008,7 +1029,7 @@
 
                         audio.onended = () => {
                             currentAudio = null;
-                            startVoiceCallLoop(false);
+                            if (isVoiceCallActive) startVoiceCallLoop(false);
                         };
                     } else {
                         startVoiceCallLoop(false);

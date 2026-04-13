@@ -977,15 +977,21 @@ async function testKnownIssues() {
     
     // ISSUE 5: No cleanup of globalMediaStream
     console.log('\n🔍 Checking Issue: Media stream not cleaned up...');
-    const noStreamCleanupIssue = await page.evaluate(() => {
-        // Start and end voice call
+    const noStreamCleanupIssue = await page.evaluate(async () => {
+        // Start voice call
         startVoiceCall();
+        
+        // Wait for media stream to be set up (async in attachMic)
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Check if stream is active
         const streamActive = globalMediaStream && globalMediaStream.active;
         
         // End call
         endVoiceCall();
+        
+        // Give cleanup a tick to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Check if stream is still active
         const streamStillActive = globalMediaStream && globalMediaStream.active;
