@@ -978,28 +978,41 @@ async function testKnownIssues() {
     // ISSUE 5: No cleanup of globalMediaStream
     console.log('\n🔍 Checking Issue: Media stream not cleaned up...');
     const noStreamCleanupIssue = await page.evaluate(async () => {
+        const waitForMediaStreamActive = async (timeoutMs = 5000, intervalMs = 50) => {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (globalMediaStream && globalMediaStream.active) {
+                    return true;
+                }
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+            return !!(globalMediaStream && globalMediaStream.active);
+        };
+
         // Start voice call
         startVoiceCall();
-        
+
         // Wait for media stream to be set up (async in attachMic)
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Check if stream is active
-        const streamActive = globalMediaStream && globalMediaStream.active;
-        
+        const streamWasActive = await waitForMediaStreamActive();
+
+        // Capture stream and tracks before cleanup so we can inspect them after endVoiceCall nulls the ref
+        const capturedStream = globalMediaStream;
+        const capturedTracks = capturedStream ? capturedStream.getTracks() : [];
+
         // End call
         endVoiceCall();
-        
+
         // Give cleanup a tick to complete
         await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Check if stream is still active
-        const streamStillActive = globalMediaStream && globalMediaStream.active;
-        
+
+        // Check that the captured tracks were actually stopped
+        const tracksEnded = capturedTracks.length > 0 &&
+            capturedTracks.every(t => t.readyState === 'ended');
+
         return {
-            streamWasActive: streamActive,
-            streamStillActiveAfterEnd: streamStillActive,
-            issueExists: streamStillActive
+            streamWasActive,
+            tracksEnded,
+            issueExists: capturedTracks.length > 0 && !tracksEnded
         };
     });
     
