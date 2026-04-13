@@ -901,8 +901,18 @@
                 ctx.close().catch(err => console.error('Failed to close audio context:', err));
             }
             
-            microphoneSource = null;
-            mediaRecorder = null;
+            if (microphoneSource) {
+                microphoneSource.disconnect();
+                microphoneSource = null;
+            }
+
+            if (mediaRecorder) {
+                mediaRecorder.ondataavailable = null;
+                mediaRecorder.onstop = null;
+                mediaRecorder = null;
+            }
+
+            audioChunks = [];
             
             setStatus('', false);
         }
