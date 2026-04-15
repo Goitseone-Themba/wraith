@@ -186,8 +186,10 @@ fn get_config_path() -> Option<PathBuf> {
 }
 
 fn load_config() -> Config {
-    if let Some(config_path) = get_config_path() {
-        match fs::read_to_string(&config_path) {
+    let config_path = get_config_path();
+
+    if let Some(config_path) = config_path.as_ref() {
+        match fs::read_to_string(config_path) {
             Ok(contents) => match toml::from_str(&contents) {
                 Ok(config) => {
                     println!("Loaded config from: {}", config_path.display());
@@ -211,7 +213,11 @@ fn load_config() -> Config {
         }
     }
 
-    println!("Using default configuration (no config file found)");
+    if config_path.is_some() {
+        println!("Using default configuration (config file found but could not be read or parsed)");
+    } else {
+        println!("Using default configuration (no config file found)");
+    }
     Config {
         server: None,
         llm: None,
