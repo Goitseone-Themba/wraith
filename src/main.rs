@@ -572,15 +572,7 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
 }
 
 async fn home() -> Html<String> {
-    let home_page =
-        fs::read_to_string("/home/goitseone/Projects/project-asteria/wraith/src/index.html");
-    match home_page {
-        Ok(page) => Html(String::from(page)),
-        Err(err) => {
-            println!("Error reading index.html : {err}");
-            Html(String::from("File not found :("))
-        }
-    }
+    Html(String::from(include_str!("index.html")))
 }
 
 #[derive(Deserialize)]
