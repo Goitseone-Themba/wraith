@@ -378,12 +378,12 @@ bars.forEach((bar, i) => {
 |----------|------|--------|
 | ~~HIGH~~ | ~~Configuration file (`.wraith.toml` or env vars)~~ | ✅ Done |
 | HIGH | Graceful degradation when external tools fail | ⬜ Pending |
-| ~~MEDIUM~~ | ~~Configurable VAD thresholds~~ | ✅ Done (via config) |
+| MEDIUM | Configurable VAD thresholds | ⬜ Pending |
 | MEDIUM | Minimum recording duration check | ⬜ Pending |
 | LOW | analyserNode/microphoneSource reuse | ⬜ Pending |
 | LOW | Improve waveform visualization | ⬜ Pending |
 
-**Note:** VAD thresholds are now configurable via `.wraith.toml`:
+**Note:** VAD thresholds are not yet wired through to the frontend voice activity detection logic. The current implementation in `src/index.html` still uses hardcoded values. The configuration below reflects the intended `.wraith.toml` shape once that wiring is implemented:
 ```toml
 [vad]
 silence_threshold_ms = 3000
