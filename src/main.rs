@@ -6,6 +6,7 @@ use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use axum::{
     response::Html,
@@ -349,8 +350,14 @@ async fn main() {
     }
 }
 
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+fn cached_config() -> &'static Config {
+    CONFIG.get_or_init(load_config)
+}
+
 async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
-    let config = load_config();
+    let config = cached_config();
 
     if payload.text.trim().is_empty() {
         return Html(String::new());
