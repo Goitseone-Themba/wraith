@@ -277,9 +277,21 @@ async fn main() {
 
     let app = create_app();
 
-    let https_addr: SocketAddr = format!("{}:{}", config.server_host(), config.server_port())
-        .parse()
-        .unwrap();
+    let host = config.server_host();
+    let port = config.server_port();
+    let https_addr: SocketAddr = match format!("{host}:{port}").parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!(
+                "Invalid server bind address '{}:{}': {}",
+                host, port, e
+            );
+            eprintln!(
+                "Please configure a valid IP address for the host and a valid port number."
+            );
+            std::process::exit(1);
+        }
+    };
 
     let cert_path = config.cert_path();
     let key_path = config.key_path();
