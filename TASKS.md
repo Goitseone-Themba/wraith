@@ -7,8 +7,8 @@ Last updated: 2026-04-15
 | Category | Completed | Pending |
 |----------|-----------|---------|
 | Voice Call Bug Fixes | 4 | 3 |
-| Configuration & Config | 0 | 1 |
-| VAD Improvements | 0 | 3 |
+| Configuration & Config | 1 | 0 |
+| VAD Improvements | 1 | 2 |
 | Resilience | 0 | 1 |
 
 ---
