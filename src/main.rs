@@ -7,6 +7,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use axum::{
     response::Html,
@@ -20,6 +21,9 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 use tempfile::NamedTempFile;
 use tower_http::cors::CorsLayer;
+
+const MAX_RETRIES: u32 = 1;
+const RETRY_DELAY_MS: u64 = 100;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -286,6 +290,7 @@ async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
 async fn main() {
     let config = load_config();
     print_config_info(&config);
+    validate_external_tools(&config);
 
     let app = create_app();
 
@@ -356,6 +361,73 @@ fn cached_config() -> &'static Config {
     CONFIG.get_or_init(load_config)
 }
 
+fn validate_external_tools(config: &Config) {
+    println!();
+    println!("Validating external tools...");
+
+    let piper_path = which("piper-tts");
+    if piper_path.is_none() {
+        println!("  [!] WARNING: piper-tts not found in PATH");
+        println!("      TTS will fail. Install piper: https://github.com/rhasspy/piper");
+    } else {
+        println!("  [✓] piper-tts: {}", piper_path.unwrap().display());
+    }
+
+    let stt_executable = config.stt_executable();
+    let stt_path = which(&stt_executable);
+    if stt_path.is_none() {
+        println!("  [!] WARNING: {} not found in PATH", stt_executable);
+        println!("      STT will fail. Install voxtype: https://github.com/taylor-vann/voxtype");
+    } else {
+        println!("  [✓] {}: {}", stt_executable, stt_path.unwrap().display());
+    }
+
+    let ffmpeg_path = which("ffmpeg");
+    if ffmpeg_path.is_none() {
+        println!("  [!] WARNING: ffmpeg not found in PATH");
+        println!("      Audio conversion will fail. Install ffmpeg.");
+    } else {
+        println!("  [✓] ffmpeg: {}", ffmpeg_path.unwrap().display());
+    }
+
+    println!();
+}
+
+fn which(program: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        for path in std::env::split_paths(&paths) {
+            let full_path = path.join(program);
+            if full_path.exists() {
+                return Some(full_path);
+            }
+        }
+        None
+    })
+}
+
+fn run_with_retry<F, R>(name: &str, mut f: F) -> Result<R, String>
+where
+    F: FnMut() -> Result<R, String>,
+{
+    let mut last_error = String::new();
+
+    for attempt in 0..=MAX_RETRIES {
+        match f() {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                last_error = e;
+                if attempt < MAX_RETRIES {
+                    let delay = RETRY_DELAY_MS * (2_u64.pow(attempt));
+                    eprintln!("[{}] Attempt {} failed, retrying in {}ms...", name, attempt + 1, delay);
+                    std::thread::sleep(Duration::from_millis(delay));
+                }
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
 async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
     let config = cached_config();
 
@@ -363,81 +435,95 @@ async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
         return Html(String::new());
     }
 
-    let mut child = Command::new("piper-tts")
-        .arg("--model")
-        .arg(&config.tts_model())
-        .arg("--output_file")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn piper-tts");
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let mut clean_text = payload.text;
+    let tts_model = config.tts_model();
+    let clean_text = {
+        let mut text = payload.text.clone();
 
         let re_code = regex::Regex::new(r"```[\s\S]*?```").unwrap();
-        clean_text = re_code.replace_all(&clean_text, "").to_string();
+        text = re_code.replace_all(&text, "").to_string();
 
         let re_inline_code = regex::Regex::new(r"`[^`]*`").unwrap();
-        clean_text = re_inline_code.replace_all(&clean_text, "").to_string();
+        text = re_inline_code.replace_all(&text, "").to_string();
 
         let re_bold_italic = regex::Regex::new(r"(\*\*|__|\*|_)").unwrap();
-        clean_text = re_bold_italic.replace_all(&clean_text, "").to_string();
+        text = re_bold_italic.replace_all(&text, "").to_string();
 
         let re_header = regex::Regex::new(r"(?m)^#+\s*").unwrap();
-        clean_text = re_header.replace_all(&clean_text, "").to_string();
+        text = re_header.replace_all(&text, "").to_string();
 
-        let single_line_text = clean_text.replace("\n", " ");
+        text.replace("\n", " ")
+    };
 
-        stdin
-            .write_all(single_line_text.as_bytes())
-            .expect("Failed to write to stdin");
-    }
+    let result = run_with_retry("piper-tts", || {
+        let mut child = Command::new("piper-tts")
+            .arg("--model")
+            .arg(&tts_model)
+            .arg("--output_file")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn piper-tts: {}", e))?;
 
-    let output = child.wait_with_output().expect("Failed to read stdout");
-
-    if !output.status.success() {
-        eprintln!("piper-tts failed with status: {}", output.status);
-        if let Ok(err_str) = String::from_utf8(output.stderr) {
-            eprintln!("piper-tts stderr: {}", err_str);
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(clean_text.as_bytes())
+                .map_err(|e| format!("Failed to write to piper-tts stdin: {}", e))?;
         }
-        return Html(String::from(
-            "<span style='color:red;'>Failed to generate audio transmission.</span>",
-        ));
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to read piper-tts output: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "piper-tts exited with status {}: {}",
+                output.status, stderr
+            ));
+        }
+
+        Ok(output.stdout)
+    });
+
+    match result {
+        Ok(output) => {
+            let b64 = BASE64_STANDARD.encode(&output);
+            let html = format!(
+                r#"<audio controls autoplay style="width:100%; height: 40px;" src="data:audio/wav;base64,{}"></audio>"#,
+                b64
+            );
+            Html(html)
+        }
+        Err(e) => {
+            eprintln!("[ERROR] TTS failed after {} retries: {}", MAX_RETRIES + 1, e);
+            Html(String::from("ERROR:TTS_FAILED"))
+        }
     }
-
-    let b64 = BASE64_STANDARD.encode(&output.stdout);
-
-    let html = format!(
-        r#"<audio controls autoplay style="width:100%; height: 40px;" src="data:audio/wav;base64,{}"></audio>"#,
-        b64
-    );
-    Html(html)
 }
 
 async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
-    let config = load_config();
+    let config = cached_config();
 
     let audio_data = match BASE64_STANDARD.decode(&payload.audio_base64) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("Failed to decode base64 audio: {}", e);
-            return Html(String::from("Error decoding audio"));
+            eprintln!("[ERROR] Failed to decode base64 audio: {}", e);
+            return Html(String::from("ERROR:DECODE_FAILED"));
         }
     };
 
     let mut temp_file = match NamedTempFile::new() {
         Ok(file) => file,
         Err(e) => {
-            eprintln!("Failed to create temp file: {}", e);
-            return Html(String::from("Error creating temp file"));
+            eprintln!("[ERROR] Failed to create temp file: {}", e);
+            return Html(String::from("ERROR:TEMP_FILE_FAILED"));
         }
     };
 
     if let Err(e) = temp_file.write_all(&audio_data) {
-        eprintln!("Failed to write audio to temp file: {}", e);
-        return Html(String::from("Error writing audio file"));
+        eprintln!("[ERROR] Failed to write audio to temp file: {}", e);
+        return Html(String::from("ERROR:TEMP_WRITE_FAILED"));
     }
 
     let temp_path = temp_file.path().to_str().unwrap().to_string();
@@ -445,74 +531,81 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
     let wav_file = match NamedTempFile::with_suffix(".wav") {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to create wav temp file: {}", e);
-            return Html(String::from("Error creating wav temp file"));
+            eprintln!("[ERROR] Failed to create wav temp file: {}", e);
+            return Html(String::from("ERROR:TEMP_WAV_FAILED"));
         }
     };
     let wav_path = wav_file.path().to_str().unwrap().to_string();
 
-    let ffmpeg_status = Command::new("ffmpeg")
-        .arg("-y")
-        .arg("-i")
-        .arg(&temp_path)
-        .arg("-ar")
-        .arg("16000")
-        .arg("-ac")
-        .arg("1")
-        .arg(&wav_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status();
+    let ffmpeg_result = run_with_retry("ffmpeg", || {
+        let output = Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-i")
+            .arg(&temp_path)
+            .arg("-ar")
+            .arg("16000")
+            .arg("-ac")
+            .arg("1")
+            .arg(&wav_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
 
-    let ffmpeg_status = match ffmpeg_status {
-        Ok(status) => status,
-        Err(e) => {
-            eprintln!("Failed to execute ffmpeg: {}", e);
-            return Html(String::from("Transcription failed: ffmpeg not found."));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("ffmpeg conversion failed: {}", stderr));
         }
-    };
+        Ok(())
+    });
 
-    if !ffmpeg_status.success() {
-        eprintln!("ffmpeg failed to convert audio format");
-        return Html(String::from("Transcription failed: invalid audio format."));
+    if let Err(e) = ffmpeg_result {
+        eprintln!("[ERROR] ffmpeg failed after retries: {}", e);
+        return Html(String::from("ERROR:FFMPEG_FAILED"));
     }
 
     let stt_executable = config.stt_executable();
-    let output = Command::new(&stt_executable)
-        .arg("--quiet")
-        .arg("transcribe")
-        .arg(&wav_path)
-        .stdout(Stdio::piped())
-        .output();
 
-    let output = match output {
-        Ok(out) => out,
+    let output = run_with_retry(&stt_executable, || {
+        Command::new(&stt_executable)
+            .arg("--quiet")
+            .arg("transcribe")
+            .arg(&wav_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("Failed to execute {}: {}", stt_executable, e))
+    });
+
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                let clean_text = text
+                    .split("\n\n")
+                    .last()
+                    .unwrap_or(&text)
+                    .trim()
+                    .to_string();
+
+                if clean_text.is_empty() {
+                    Html(String::from("ERROR:EMPTY_TRANSCRIPTION"))
+                } else {
+                    Html(clean_text)
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                eprintln!(
+                    "[ERROR] {} exited with status {:?}: {}",
+                    stt_executable, out.status, stderr
+                );
+                Html(String::from("ERROR:STT_FAILED"))
+            }
+        }
         Err(e) => {
-            eprintln!("Failed to execute {}: {}", stt_executable, e);
-            return Html(String::from(&format!(
-                "Transcription failed: {} not found.",
-                stt_executable
-            )));
+            eprintln!("[ERROR] STT failed after retries: {}", e);
+            Html(String::from("ERROR:STT_FAILED"))
         }
-    };
-
-    if output.status.success() {
-        let text = String::from_utf8_lossy(&output.stdout).to_string();
-
-        let clean_text = text
-            .split("\n\n")
-            .last()
-            .unwrap_or(&text)
-            .trim()
-            .to_string();
-
-        Html(clean_text)
-    } else {
-        eprintln!("{} failed with status: {}", stt_executable, output.status);
-        if let Ok(err_str) = String::from_utf8(output.stderr) {
-            eprintln!("{} stderr: {}", stt_executable, err_str);
-        }
-        Html(String::from("Transcription failed."))
     }
 }
 

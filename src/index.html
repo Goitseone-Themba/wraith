@@ -741,7 +741,20 @@
             const params = new URLSearchParams();
             params.append('audio_base64', b64);
             const res = await fetch(`${baseUrl}transcribe`, { method: 'POST', body: params });
-            return await res.text();
+            const text = await res.text();
+            if (text.startsWith('ERROR:')) {
+                const errorType = text.replace('ERROR:', '');
+                console.error('Transcription error:', errorType);
+                if (errorType === 'FFMPEG_FAILED') {
+                    return 'Transcription failed: audio converter not working.';
+                } else if (errorType === 'STT_FAILED') {
+                    return 'Transcription failed: speech recognition not working.';
+                } else if (errorType === 'EMPTY_TRANSCRIPTION') {
+                    return '';
+                }
+                return 'Transcription failed.';
+            }
+            return text;
         }
 
         async function chat(text) {
@@ -756,6 +769,10 @@
             params.append('text', text);
             const res = await fetch(`${baseUrl}synthesize`, { method: 'POST', body: params });
             const html = await res.text();
+            if (html.startsWith('ERROR:')) {
+                console.error('TTS error:', html.replace('ERROR:', ''));
+                return null;
+            }
             const match = html.match(/src="([^"]+)"/);
             return match ? match[1].split(',')[1] : null;
         }
@@ -792,6 +809,8 @@
                     audio.onended = () => {
                         currentAudio = null;
                     };
+                } else {
+                    appendMessage('ai', '(Voice synthesis unavailable - text only)');
                 }
                 
                 setStatus('', false);
@@ -840,8 +859,11 @@
                     reader.onloadend = async () => {
                         const b64 = reader.result.split(',')[1];
                         const text = await transcribe(b64);
-                        if (text && text !== 'Transcription failed.') {
+                        if (text && !text.startsWith('Transcription failed:') && text.trim()) {
                             textInput.value = text;
+                        } else if (text.startsWith('Transcription failed:')) {
+                            setStatus('Recording failed: ' + text.replace('Transcription failed: ', ''), false);
+                            setTimeout(() => setStatus('', false), 3000);
                         }
                         setStatus('', false);
                     };
@@ -1011,8 +1033,9 @@
                     const b64 = reader.result.split(',')[1];
 
                     const text = await transcribe(b64);
-                    if (!text || text === 'Transcription failed.' || !text.trim()) {
-                        startVoiceCallLoop(false);
+                    if (!text || text.startsWith('Transcription failed:') || !text.trim()) {
+                        transcriptionPreview.textContent = 'Could not understand. Try again.';
+                        setTimeout(() => startVoiceCallLoop(false), 1500);
                         return;
                     }
 
@@ -1021,7 +1044,7 @@
                     const response = await chat(text);
                     if (!isVoiceCallActive) return;
                     if (response.startsWith('Error')) {
-                        appendMessage('ai', 'LM Studio connection lost.');
+                        appendMessage('ai', 'AI connection lost. Is LM Studio running?');
                         startVoiceCallLoop(false);
                         return;
                     }
@@ -1042,6 +1065,7 @@
                             if (isVoiceCallActive) startVoiceCallLoop(false);
                         };
                     } else {
+                        appendMessage('ai', '(Voice unavailable - text only)');
                         startVoiceCallLoop(false);
                     }
                 };
