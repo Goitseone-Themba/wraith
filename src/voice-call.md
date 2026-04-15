@@ -4,6 +4,9 @@
 
 The voice call mode is Wraith's hands-free interaction loop. This document traces the complete flow, identifies state transitions, and performs root cause analysis on known and suspected issues.
 
+**Last updated:** 2026-04-15  
+**Status:** 4 issues fixed, 3 pending
+
 ---
 
 ## Complete Flow Diagram
@@ -12,15 +15,15 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              VOICE CALL INITIATION                          │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  User clicks "Voice Call" button                                            │
 │  → btnVoiceCall click handler                                               │
 │  → if (!isVoiceCallActive) startVoiceCall()                                │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  startVoiceCall()                                                          │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
@@ -31,17 +34,17 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 │  │ 5. startVoiceCallLoop(false)                                           │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  startVoiceCallLoop(fromInterruption: boolean)                              │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │ 1. isProcessingCallQuery = false                                       │  │
-│  │ 2. stopMediaRecorder()  ← Stops any running recorder                   │  │
-│  │ 3. if (analyserNode) analyserNode.disconnect() ← PROBLEM POINT        │  │
+│  │ 2. await stopMediaRecorderAndWait() ← FIXED: now awaits properly     │  │
+│  │ 3. if (analyserNode) analyserNode.disconnect() ← ISSUE #2            │  │
 │  │ 4. transcriptionPreview.textContent = 'Listening...'                    │  │
 │  │ 5. if (fromInterruption) appendMessage('user', '[Interrupted]')          │  │
-│  │ 6. attachMic()  ← PROBLEM POINT: creates new MediaRecorder              │  │
+│  │ 6. attachMic()                                                         │  │
 │  │ 7. if (!started) endVoiceCall()                                        │  │
 │  │ 8. isRecordingCall = true                                              │  │
 │  │ 9. lastSpeakTimestamp = Date.now()                                     │  │
@@ -49,34 +52,35 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 │  │ 11. vadRafId = requestAnimationFrame(tickVAD)                          │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  tickVAD()  ← Runs every animation frame (~60fps)                           │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │ 1. if (!isVoiceCallActive) return                                      │  │
 │  │ 2. Get time-domain data from analyserNode                              │  │
 │  │ 3. Compute RMS volume                                                  │  │
-│  │ 4. Update waveform bars (visual feedback)                              │  │
+│  │ 4. Update waveform bars (visual feedback) ← ISSUE #7: uses Math.random│  │
 │  │ 5. TIMING BRANCH:                                                      │  │
 │  │    a) if (isRecordingCall && !isProcessingCallQuery)                   │  │
-│  │       → if RMS > SPEAKING_THRESHOLD: update lastSpeakTimestamp         │  │
+│  │       → if RMS > SPEAKING_THRESHOLD: update lastSpeakTimestamp        │  │
 │  │       → else if silent > SILENCE_THRESHOLD: stopRecordingAndProcess()  │  │
+│  │       → ISSUE #5: No minimum recording duration check                  │  │
 │  │    b) if (!isRecordingCall && currentAudio && !paused)                │  │
 │  │       → if RMS > INTERRUPT_THRESHOLD: pause audio, restart loop        │  │
 │  │ 6. Schedule next frame: requestAnimationFrame(tickVAD)                  │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                    ┌─────────────────┴─────────────────┐
-                    │                                   │
-                    ▼                                   ▼
+                                       │
+                     ┌─────────────────┴─────────────────┐
+                     │                                   │
+                     ▼                                   ▼
 ┌───────────────────────────────┐     ┌───────────────────────────────────────┐
 │   SILENCE DETECTED            │     │   INTERRUPT DETECTED                 │
 │   stopRecordingAndProcess()   │     │   (during AI speech)                  │
 └───────────────────────────────┘     └───────────────────────────────────────┘
-                    │                                   │
-                    ▼                                   │
+                     │                                   │
+                     ▼                                   │
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  stopRecordingAndProcess()                                                  │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
@@ -84,7 +88,7 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 │  │ 2. isRecordingCall = false                                            │  │
 │  │ 3. transcriptionPreview.textContent = 'Processing...'                  │  │
 │  │ 4. setStatus('Processing...', true)                                    │  │
-│  │ 5. mediaRecorder.onstop = async () => {  ← CRITICAL: async handler   │  │
+│  │ 5. mediaRecorder.onstop = async () => {                               │  │
 │  │    a. Convert audio chunks to blob → base64                           │  │
 │  │    b. POST to /transcribe                                              │  │
 │  │    c. if (empty/failed): startVoiceCallLoop(false), return            │  │
@@ -100,21 +104,29 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 │  │ 6. stopMediaRecorder()                                                 │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  END CALL                                                                  │
 │  User clicks "End Call" or error occurs                                    │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ endVoiceCall():                                                        │  │
+│  │ endVoiceCall() [FIXED - full cleanup]:                                 │  │
 │  │ 1. isVoiceCallActive = false                                          │  │
 │  │ 2. isRecordingCall = false                                            │  │
 │  │ 3. isProcessingCallQuery = false                                      │  │
 │  │ 4. btnVoiceCall.classList.remove('active')                            │  │
 │  │ 5. voiceCallUI.classList.remove('active')                            │  │
-│  │ 6. stopMediaRecorder()                                                │  │
-│  │ 7. cancelAnimationFrame(vadRafId)                                     │  │
-│  │ 8. setStatus('', false)                                               │  │
+│  │ 6. pause & clear currentAudio                                          │  │
+│  │ 7. resetAllAudioPlayers()                                             │  │
+│  │ 8. stopMediaRecorder()                                                │  │
+│  │ 9. cancelAnimationFrame(vadRafId)                                     │  │
+│  │ 10. disconnect analyserNode, set to null                              │  │
+│  │ 11. stop all media stream tracks, set to null                         │  │
+│  │ 12. close audioContext                                                 │  │
+│  │ 13. disconnect microphoneSource, set to null                         │  │
+│  │ 14. clear mediaRecorder handlers, set to null                         │  │
+│  │ 15. clear audioChunks                                                  │  │
+│  │ 16. setStatus('', false)                                               │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -136,133 +148,121 @@ The voice call mode is Wraith's hands-free interaction loop. This document trace
 
 ---
 
-## Root Cause Analysis
+## Issue Tracker
 
-### Issue 1: MediaRecorder Handler Stacking
+### ✅ FIXED: Issue 1 - MediaRecorder Handler Stacking
 
 **Severity:** High  
 **Location:** `startVoiceCallLoop()` → `attachMic()` → `mediaRecorder`
 
 **Problem:**
 ```javascript
-// attachMic() is called on EVERY loop iteration
+// Old: mediaRecorder recreated each loop, old onstop could fire
 mediaRecorder = new MediaRecorder(globalMediaStream, { mimeType: 'audio/webm' });
-mediaRecorder.ondataavailable = e => { /* ... */ };
 ```
 
-The `mediaRecorder` object is recreated each time `startVoiceCallLoop()` runs. However, the OLD recorder's `onstop` handler may still be pending. This creates a scenario where:
+**Fix Applied:** `stopMediaRecorderAndWait()` (lines 715-737)
+```javascript
+function stopMediaRecorderAndWait() {
+    return new Promise((resolve) => {
+        if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+            resolve();
+            return;
+        }
+        
+        const previousOnStop = mediaRecorder.onstop;
+        mediaRecorder.onstop = (e) => {
+            if (previousOnStop) previousOnStop(e);
+            resolve();
+        };
+        
+        mediaRecorder.stop();
+        
+        // Safety timeout
+        setTimeout(() => resolve(), 100);
+    });
+}
+```
 
-1. `startVoiceCallLoop()` creates Recorder A, starts it
-2. Silence detected → `stopRecordingAndProcess()` sets `onstop` on A
-3. VAD loop calls `startVoiceCallLoop()` again (from `audio.onended`)
-4. `attachMic()` creates NEW Recorder B, replaces variable
-5. OLD Recorder A's `onstop` fires → uses stale `audioChunks` array
-6. NEW Recorder B is also running → multiple recorders capturing
-
-**Evidence:** Audio chunks from previous sessions appearing in transcription, or "Processing..." showing briefly before "Listening..." despite no speech.
-
-**Fix:** Either:
-- Store recorder reference and call `.stop()` before creating new one
-- Use a single recorder for entire call session
-- Clear `audioChunks` atomically before starting new recording
+**Status:** ✅ RESOLVED in PR #18
 
 ---
 
-### Issue 2: analyserNode Disconnect Before Attach
+### ⚠️ ISSUE 2: analyserNode Disconnect Before Attach
 
 **Severity:** Medium  
-**Location:** `startVoiceCallLoop()` line 787
+**Location:** `startVoiceCallLoop()` line 929
 
 **Problem:**
 ```javascript
 async function startVoiceCallLoop(fromInterruption) {
-    isProcessingCallQuery = false;
-    stopMediaRecorder();
+    // ...
     if (analyserNode) analyserNode.disconnect();  // ← Disconnected
     // ...
     const started = await attachMic();  // ← Will reconnect
+    // ...
+    microphoneSource.connect(analyserNode);
+}
 ```
 
-The code disconnects then immediately reconnects the analyser. This creates a brief window where VAD could fire from stale data or miss the start of speech. More critically, `attachMic()` does this:
-
+The code disconnects then immediately reconnects. More critically, `attachMic()` creates a NEW `microphoneSource` each time:
 ```javascript
 if (microphoneSource) microphoneSource.disconnect();
 microphoneSource = audioContext.createMediaStreamSource(globalMediaStream);
 ```
 
-It creates a NEW `microphoneSource` each time, even though `globalMediaStream` is the same. This is wasteful and could cause issues if called rapidly (e.g., during audio interruption).
+**Impact:** Wasteful resource churn during rapid interruptions.
 
-**Fix:** Create the source once. Only connect/disconnect the existing source.
+**Fix needed:** Create source once, only connect/disconnect.
+
+**Status:** ⬜ PENDING
 
 ---
 
-### Issue 3: Race Condition in `stopRecordingAndProcess()`
+### ✅ PARTIALLY FIXED: Issue 3 - Race Condition in `stopRecordingAndProcess()`
 
 **Severity:** Medium  
 **Location:** `stopRecordingAndProcess()` → `mediaRecorder.onstop`
 
 **Problem:**
 ```javascript
-mediaRecorder.onstop = async () => {
-    // This runs asynchronously after stopMediaRecorder() returns
-    const blob = new Blob(audioChunks, { type: 'audio/webm' });
-    const reader = new FileReader();
-    reader.readAsDataURL(blob);
-    reader.onloadend = async () => {
-        const b64 = reader.result.split(',')[1];
-        const text = await transcribe(b64);
-        // ...
-    };
-};
+mediaRecorder.onstop = async () => { /* async processing */ };
 stopMediaRecorder();  // onstop fires LATER
 ```
 
-The function sets an async handler and returns. If `startVoiceCallLoop()` is called again before `onstop` fires (e.g., error path calling `startVoiceCallLoop(false)`), the old recorder is still running.
+**Mitigation:** `stopMediaRecorderAndWait()` chains handlers properly.
 
-**Fix:** Await the stop explicitly, or track recorder state more carefully.
+**Remaining risk:** If `startVoiceCallLoop()` is called before `onstop` fires (error path), old recorder state could conflict.
+
+**Status:** ⚠️ MITIGATED but not fully resolved
 
 ---
 
-### Issue 4: Android Microphone Permissions Not Handled
+### ✅ FIXED: Issue 4 - Android Microphone Permissions Not Handled
 
 **Severity:** High  
 **Location:** `attachMic()` → `navigator.mediaDevices.getUserMedia()`
 
-**Status:** ✅ FIXED
-
-**Problem:**
-```javascript
-globalMediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-});
-```
-
-This didn't work reliably on Android because:
-1. No explicit permission handling - browser may reject silently
-2. No MIME type fallback for `MediaRecorder` (Android supports different codecs)
-3. No graceful error message to user
-4. `getUserMedia()` constraints aren't mobile-optimized
-
-**Android Browser Requirements:**
-- Chrome on Android needs specific constraints
-- Safari on iOS has completely different requirements
-- Some Android devices need `audio/Mp4` or `audio/ogg` instead of `audio/webm`
+**Problem:** No MIME type fallback, no error handling for mobile browsers.
 
 **Fix Applied:**
-- Added `getSupportedMimeType()` to try multiple codecs in order:
-  - `audio/webm;codecs=opus` (Chrome, Firefox)
-  - `audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav` (fallbacks)
-- Added `handleMicError()` with user-friendly messages for:
-  - `NotAllowedError` / `PermissionDeniedError`
-  - `NotFoundError` / `DevicesNotFoundError`
-  - `NotReadableError` / `TrackStartError`
-  - `OverconstrainedError`
+1. `getSupportedMimeType()` tries multiple codecs in order:
+   - `audio/webm;codecs=opus` (Chrome, Firefox)
+   - `audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav` (fallbacks)
+
+2. `handleMicError()` provides user-friendly messages for:
+   - `NotAllowedError` / `PermissionDeniedError`
+   - `NotFoundError` / `DevicesNotFoundError`
+   - `NotReadableError` / `TrackStartError`
+   - `OverconstrainedError`
+
+**Status:** ✅ RESOLVED in PR #16
 
 ---
 
-### Issue 5: No Debouncing on Silence Detection
+### ⚠️ ISSUE 5: No Debouncing on Silence Detection
 
-**Severity:** Low-Medium  
+**Severity:** Medium  
 **Location:** `tickVAD()`
 
 **Problem:**
@@ -272,37 +272,39 @@ if (silent > SILENCE_MS_THRESHOLD) {
 }
 ```
 
-Once `SILENCE_MS_THRESHOLD` (3 seconds) is reached, `stopRecordingAndProcess()` fires immediately. There's no debounce—if the user pauses for breath mid-sentence longer than 3 seconds, their query gets sent prematurely.
+No minimum recording duration check. Saying "he-" then pausing 3 seconds sends a partial query.
 
-**Fix:** Add minimum recording duration check, or require a minimum amount of "speech time" before accepting silence as end-of-query.
+**Fix needed:** Track total "speech time" during recording. Only trigger on silence if user spoke for at least ~1 second total.
+
+**Status:** ⬜ PENDING
 
 ---
 
-### Issue 6: `sendMessage()` Audio Not Auto-Playing
+### ✅ FIXED: Issue 6 - `sendMessage()` Audio Not Auto-Playing
 
 **Severity:** Low (User Experience)  
-**Location:** `sendMessage()` → `appendMessage()`
+**Location:** `sendMessage()`
 
-**Problem:**
-In text input mode, when the AI responds:
+**Problem:** In text input mode, audio was never auto-played.
+
+**Fix Applied:** Added auto-play in `sendMessage()` (lines 787-795):
 ```javascript
-setStatus('Speaking...', true);
-const audioB64 = await synthesize(response);
-appendMessage('ai', response, audioB64);
+if (audioB64) {
+    const audio = new Audio(`data:audio/wav;base64,${audioB64}`);
+    currentAudio = audio;
+    audio.play();
+    
+    audio.onended = () => {
+        currentAudio = null;
+    };
+}
 ```
 
-`appendMessage()` creates an `audio-mini` player that requires a click. The audio is never auto-played. Compare to voice call mode:
-```javascript
-const audio = new Audio(`data:audio/wav;base64,${audioB64}`);
-currentAudio = audio;
-audio.play();  // ← Auto-played
-```
-
-**Fix:** Auto-play the first AI audio response in text mode, similar to voice call mode.
+**Status:** ✅ RESOLVED in PR #14
 
 ---
 
-### Issue 7: Waveform Bars Use Random Height
+### ⚠️ ISSUE 7: Waveform Bars Use Random Height
 
 **Severity:** Low (Visual)  
 **Location:** `tickVAD()`
@@ -315,37 +317,40 @@ bars.forEach((bar, i) => {
 });
 ```
 
-The `Math.random()` makes the waveform look "active" but it's fake—it doesn't represent actual frequency data. Also, all bars get the same random height, making it look like a pulsing blob rather than a real waveform.
+`Math.random()` makes the waveform look active but fake. All bars get the same random height.
 
-**Fix:** Use actual frequency data from `getByteFrequencyData()` for more realistic visualization, or remove randomness if keeping it purely decorative.
+**Fix needed:** Use actual frequency data:
+```javascript
+const freqData = new Uint8Array(analyserNode.frequencyBinCount);
+analyserNode.getByteFrequencyData(freqData);
+bars.forEach((bar, i) => {
+    // Sample from freqData instead of random
+    const h = Math.max(4, (freqData[i * 4] / 255) * 40);
+    bar.style.height = `${h}px`;
+});
+```
+
+**Status:** ⬜ PENDING
 
 ---
 
-### Issue 8: No Cleanup on `endVoiceCall()`
+### ✅ FIXED: Issue 8 - No Cleanup on `endVoiceCall()`
 
 **Severity:** Low  
 **Location:** `endVoiceCall()`
 
-**Problem:**
-```javascript
-function endVoiceCall() {
-    isVoiceCallActive = false;
-    isRecordingCall = false;
-    isProcessingCallQuery = false;
-    btnVoiceCall.classList.remove('active');
-    voiceCallUI.classList.remove('active');
-    stopMediaRecorder();
-    if (vadRafId) cancelAnimationFrame(vadRafId);
-    setStatus('', false);
-}
-```
+**Problem:** Missing cleanup on end call.
 
-Missing cleanup:
-- `globalMediaStream` is not stopped (mic stays "in use")
-- `audioContext` is not closed
-- `currentAudio` is not stopped if playing
+**Fix Applied:** Full cleanup in `endVoiceCall()` (lines 868-918):
+- Pauses and clears `currentAudio`
+- Calls `resetAllAudioPlayers()`
+- Stops all media stream tracks
+- Closes `audioContext`
+- Disconnects `analyserNode` and `microphoneSource`
+- Clears `mediaRecorder` handlers
+- Clears `audioChunks`
 
-**Fix:** Stop all streams, close audio context, pause any playing audio.
+**Status:** ✅ RESOLVED in PR #2
 
 ---
 
@@ -355,29 +360,63 @@ Missing cleanup:
 |-------|---------|----------|--------------|------------|
 | Init | Click "Voice Call" | ~100ms | Mic granted, VAD starts | Error shown, call ends |
 | Listen | VAD starts | Until silence | RMS threshold met | Timeout (none) |
-| Silence Detection | RMS < threshold | 3s | `stopRecordingAndProcess()` | False trigger (Issue 5) |
+| Silence Detection | RMS < threshold | 3s (hardcoded) | `stopRecordingAndProcess()` | False trigger (Issue 5) |
 | Transcribe | Recording stops | ~1-3s | Text returned | Loop restarts |
 | Chat | Text ready | Variable | Response returned | Error message, loop restarts |
 | Synthesize | Response ready | ~1-5s | Audio generated | Loop restarts |
 | Playback | Audio ready | Until done | Loop restarts | Loop restarts |
 | Interrupt | Loud noise | Instant | Loop restarts | (None) |
+| End Call | User clicks / error | Instant | Full cleanup | (None) |
 
 ---
 
 ## Recommendations
 
-### Immediate (Phase 2)
-1. Fix MediaRecorder lifecycle (Issue 1, 3)
-2. Add Android permission handling (Issue 4)
-3. Add auto-play to text input mode (Issue 6)
-4. Add cleanup on endCall (Issue 8)
+### Immediate (Phase 2) - Updated for 2026-04-15
 
-### Short Term
-5. Add minimum recording duration before silence detection
-6. Fix analyserNode/microphoneSource reuse
-7. Improve waveform visualization
+| Priority | Task | Status |
+|----------|------|--------|
+| ~~HIGH~~ | ~~Configuration file (`.wraith.toml` or env vars)~~ | ✅ Done |
+| HIGH | Graceful degradation when external tools fail | ⬜ Pending |
+| MEDIUM | Configurable VAD thresholds | ⬜ Pending |
+| MEDIUM | Minimum recording duration check | ⬜ Pending |
+| LOW | analyserNode/microphoneSource reuse | ⬜ Pending |
+| LOW | Improve waveform visualization | ⬜ Pending |
 
-### Long Term
-8. Consider WebRTC VAD for better voice detection
-9. Add conversation history persistence
-10. Shell command integration
+**Note:** VAD thresholds are not yet wired through to the frontend voice activity detection logic. The current implementation in `src/index.html` still uses hardcoded values. The configuration below reflects the intended `.wraith.toml` shape once that wiring is implemented:
+```toml
+[vad]
+silence_threshold_ms = 3000
+volume_threshold_speaking = 5.0
+volume_threshold_interrupt = 8.0
+min_recording_duration_ms = 500
+```
+
+### Short Term (Phase 2)
+
+| Task | Status |
+|------|--------|
+| WebRTC VAD for better voice detection | ⬜ Pending |
+
+### Long Term (Phase 3+)
+
+| Task | Status |
+|------|--------|
+| Multi-turn conversation history | ⬜ Pending |
+| Session memory across restarts | ⬜ Pending |
+| Shell command integration | ⬜ Pending |
+
+---
+
+## Appendix: Issue Status History
+
+| Issue | Reported | Fixed | PR |
+|-------|----------|-------|-----|
+| #1 MediaRecorder Handler Stacking | 2026-04-13 | 2026-04-13 | #18 |
+| #2 analyserNode Disconnect | 2026-04-13 | - | - |
+| #3 Race Condition | 2026-04-13 | 2026-04-13 | #18 (mitigated) |
+| #4 Android Permissions | 2026-04-13 | 2026-04-13 | #16 |
+| #5 No Debouncing | 2026-04-13 | - | - |
+| #6 Text Mode Auto-Play | 2026-04-13 | 2026-04-13 | #14 |
+| #7 Waveform Random | 2026-04-13 | - | - |
+| #8 No Cleanup | 2026-04-13 | 2026-04-13 | #2 |

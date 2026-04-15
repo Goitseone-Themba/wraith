@@ -120,11 +120,20 @@ Record audio with **RECORD STT**, edit the transcription in the text field, then
 
 ### Phase 2: System Refinement
 
-- [ ] Configuration file (`.wraith.toml` or env vars) instead of hardcoded paths
-- [ ] Better error handling and user feedback
-- [ ] Graceful degradation when external tools fail
-- [ ] Configurable VAD thresholds (silence duration, volume sensitivity)
-- [ ] Model/tool path validation on startup
+- [x] ~~Configuration file~~ (`.wraith.toml` or env vars) — **done**
+- [x] ~~Better error handling and user feedback~~ — **partially done** (`handleMicError()`)
+- [ ] Graceful degradation when external tools fail — **pending**
+- [ ] Configurable VAD thresholds (silence duration, volume sensitivity) — **pending**
+- [ ] Model/tool path validation on startup — **pending**
+
+#### Phase 2 Progress (2026-04-15)
+
+| Task | Status | PR |
+|------|--------|-----|
+| MediaRecorder lifecycle fix | ✅ Done | #18 |
+| Android permission handling | ✅ Done | #16 |
+| Text input auto-play | ✅ Done | #14 |
+| Cleanup on end call | ✅ Done | #2 |
 
 ### Phase 3: Persistence & Memory
 
@@ -174,15 +183,66 @@ Models should target **1B-4B parameters** for responsive real-time interaction o
 
 ## Configuration
 
-The server binds to `0.0.0.0:2026`. To change the port or model settings, edit `src/main.rs`:
+Wraith uses a configuration file (`.wraith.toml`) with environment variable overrides.
 
-```rust
-// LLM endpoint (LM Studio)
-let lm_url = "http://localhost:1234/v1/chat/completions";
+### Config File Location (checked in order)
 
-// TTS model path
-let model = "/path/to/your/voice.onnx";
+1. `$WRAITH_CONFIG` environment variable
+2. `~/.config/wraith/wraith.toml` (recommended)
+3. `.wraith.toml` in project directory
+
+### Configuration Options
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 2026
+
+[llm]
+model = "liquid/lfm2.5-1.2b"
+endpoint = "http://localhost:1234/v1/chat/completions"
+
+[tts]
+model = "/home/goitseone/piper-voices/en_US-libritts_r-high.onnx"
+
+[stt]
+executable = "voxtype"
+
+# NOTE: `[vad]` settings are planned/documented configuration, but are not yet
+# wired into the current browser/frontend VAD implementation. The WebUI still
+# uses built-in thresholds for silence/speaking/interrupt detection.
+[vad]
+silence_threshold_ms = 3000
+volume_threshold_speaking = 5.0
+volume_threshold_interrupt = 8.0
+min_recording_duration_ms = 500
+
+[security]
+cert_path = "cert.pem"
+key_path = "key.pem"
 ```
+
+### Environment Variables
+
+All settings can be overridden via environment variables, except the VAD values
+which are currently documented for planned support and are not yet wired into
+the browser/frontend VAD implementation:
+
+| Variable | Description |
+|----------|-------------|
+| `WRAITH_HOST` | Server bind address |
+| `WRAITH_PORT` | Server port |
+| `WRAITH_LLM_MODEL` | LLM model name |
+| `WRAITH_LLM_ENDPOINT` | LLM API endpoint |
+| `WRAITH_TTS_MODEL` | TTS model path |
+| `WRAITH_STT_EXECUTABLE` | STT executable name |
+| `WRAITH_VAD_SILENCE_MS` | Planned: silence threshold (ms); not yet hooked up to frontend VAD |
+| `WRAITH_VAD_VOLUME_SPEAKING` | Planned: speaking volume threshold; not yet hooked up to frontend VAD |
+| `WRAITH_VAD_VOLUME_INTERRUPT` | Planned: interrupt volume threshold; not yet hooked up to frontend VAD |
+| `WRAITH_VAD_MIN_RECORDING_MS` | Planned: minimum recording duration (ms); not yet hooked up to frontend VAD |
+| `WRAITH_CERT_PATH` | TLS certificate path |
+| `WRAITH_KEY_PATH` | TLS key path |
+| `WRAITH_CONFIG` | Custom config file path |
 
 ## Contributing
 

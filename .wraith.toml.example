@@ -1,0 +1,36 @@
+# Wraith Configuration
+#
+# Place this file at one of these locations:
+#   - ~/.config/wraith/wraith.toml (recommended)
+#   - ./.wraith.toml (local, in project directory)
+#   - Or specify with: WRAITH_CONFIG=/path/to/config.toml
+#
+# All settings can be overridden with environment variables:
+#   WRAITH_HOST, WRAITH_PORT, WRAITH_LLM_MODEL, WRAITH_LLM_ENDPOINT,
+#   WRAITH_TTS_MODEL, WRAITH_STT_EXECUTABLE, WRAITH_VAD_SILENCE_MS,
+#   WRAITH_VAD_VOLUME_SPEAKING, WRAITH_VAD_VOLUME_INTERRUPT,
+#   WRAITH_VAD_MIN_RECORDING_MS, WRAITH_CERT_PATH, WRAITH_KEY_PATH
+
+[server]
+host = "0.0.0.0"
+port = 2026
+
+[llm]
+model = "liquid/lfm2.5-1.2b"
+endpoint = "http://localhost:1234/v1/chat/completions"
+
+[tts]
+model = "/home/goitseone/piper-voices/en_US-libritts_r-high.onnx"
+
+[stt]
+executable = "voxtype"
+
+[vad]
+silence_threshold_ms = 3000
+volume_threshold_speaking = 5.0
+volume_threshold_interrupt = 8.0
+min_recording_duration_ms = 500
+
+[security]
+cert_path = "cert.pem"
+key_path = "key.pem"
