@@ -208,6 +208,9 @@ model = "/home/goitseone/piper-voices/en_US-libritts_r-high.onnx"
 [stt]
 executable = "voxtype"
 
+# NOTE: `[vad]` settings are planned/documented configuration, but are not yet
+# wired into the current browser/frontend VAD implementation. The WebUI still
+# uses built-in thresholds for silence/speaking/interrupt detection.
 [vad]
 silence_threshold_ms = 3000
 volume_threshold_speaking = 5.0
@@ -221,7 +224,9 @@ key_path = "key.pem"
 
 ### Environment Variables
 
-All settings can be overridden via environment variables:
+All settings can be overridden via environment variables, except the VAD values
+which are currently documented for planned support and are not yet wired into
+the browser/frontend VAD implementation:
 
 | Variable | Description |
 |----------|-------------|
@@ -231,10 +236,10 @@ All settings can be overridden via environment variables:
 | `WRAITH_LLM_ENDPOINT` | LLM API endpoint |
 | `WRAITH_TTS_MODEL` | TTS model path |
 | `WRAITH_STT_EXECUTABLE` | STT executable name |
-| `WRAITH_VAD_SILENCE_MS` | Silence threshold (ms) |
-| `WRAITH_VAD_VOLUME_SPEAKING` | Speaking volume threshold |
-| `WRAITH_VAD_VOLUME_INTERRUPT` | Interrupt volume threshold |
-| `WRAITH_VAD_MIN_RECORDING_MS` | Minimum recording duration (ms) |
+| `WRAITH_VAD_SILENCE_MS` | Planned: silence threshold (ms); not yet hooked up to frontend VAD |
+| `WRAITH_VAD_VOLUME_SPEAKING` | Planned: speaking volume threshold; not yet hooked up to frontend VAD |
+| `WRAITH_VAD_VOLUME_INTERRUPT` | Planned: interrupt volume threshold; not yet hooked up to frontend VAD |
+| `WRAITH_VAD_MIN_RECORDING_MS` | Planned: minimum recording duration (ms); not yet hooked up to frontend VAD |
 | `WRAITH_CERT_PATH` | TLS certificate path |
 | `WRAITH_KEY_PATH` | TLS key path |
 | `WRAITH_CONFIG` | Custom config file path |
