@@ -1,6 +1,12 @@
 #[cfg(test)]
 mod tests;
 
+use serde::Deserialize;
+use std::env;
+use std::fs;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
 use axum::{
     response::Html,
     routing::{get, post},
@@ -8,41 +14,241 @@ use axum::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use base64::prelude::*;
-use serde::Deserialize;
 use serde_json::json;
 use std::process::{Command, Stdio};
-use std::{fs, io::Write, net::SocketAddr};
+use std::io::Write;
 use tempfile::NamedTempFile;
 use tower_http::cors::CorsLayer;
 
-#[derive(Deserialize)]
-struct SynthesizeRequest {
-    text: String,
+#[derive(Debug, Deserialize)]
+struct Config {
+    server: Option<ServerConfig>,
+    llm: Option<LlmConfig>,
+    tts: Option<TtsConfig>,
+    stt: Option<SttConfig>,
+    vad: Option<VadConfig>,
+    security: Option<SecurityConfig>,
 }
 
-#[derive(Deserialize)]
-struct TranscribeRequest {
-    audio_base64: String,
+#[derive(Debug, Deserialize)]
+struct ServerConfig {
+    host: Option<String>,
+    port: Option<u16>,
 }
 
-#[derive(Deserialize)]
-struct ChatRequest {
-    text: String,
+#[derive(Debug, Deserialize)]
+struct LlmConfig {
+    model: Option<String>,
+    endpoint: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-struct LmStudioResponse {
-    choices: Vec<LmStudioChoice>,
+#[derive(Debug, Deserialize)]
+struct TtsConfig {
+    model: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-struct LmStudioChoice {
-    message: LmStudioMessage,
+#[derive(Debug, Deserialize)]
+struct SttConfig {
+    executable: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-struct LmStudioMessage {
-    content: String,
+#[derive(Debug, Deserialize)]
+struct VadConfig {
+    silence_threshold_ms: Option<u64>,
+    volume_threshold_speaking: Option<f64>,
+    volume_threshold_interrupt: Option<f64>,
+    min_recording_duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SecurityConfig {
+    cert_path: Option<String>,
+    key_path: Option<String>,
+}
+
+impl Config {
+    fn server_host(&self) -> String {
+        env::var("WRAITH_HOST")
+            .ok()
+            .or_else(|| self.server.as_ref().and_then(|s| s.host.clone()))
+            .unwrap_or_else(|| "0.0.0.0".to_string())
+    }
+
+    fn server_port(&self) -> u16 {
+        env::var("WRAITH_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.server.as_ref().and_then(|s| s.port))
+            .unwrap_or(2026)
+    }
+
+    fn llm_model(&self) -> String {
+        env::var("WRAITH_LLM_MODEL")
+            .ok()
+            .or_else(|| self.llm.as_ref().and_then(|l| l.model.clone()))
+            .unwrap_or_else(|| "liquid/lfm2.5-1.2b".to_string())
+    }
+
+    fn llm_endpoint(&self) -> String {
+        env::var("WRAITH_LLM_ENDPOINT")
+            .ok()
+            .or_else(|| self.llm.as_ref().and_then(|l| l.endpoint.clone()))
+            .unwrap_or_else(|| "http://localhost:1234/v1/chat/completions".to_string())
+    }
+
+    fn tts_model(&self) -> String {
+        env::var("WRAITH_TTS_MODEL")
+            .ok()
+            .or_else(|| self.tts.as_ref().and_then(|t| t.model.clone()))
+            .unwrap_or_else(|| "/home/goitseone/piper-voices/en_US-libritts_r-high.onnx".to_string())
+    }
+
+    fn stt_executable(&self) -> String {
+        env::var("WRAITH_STT_EXECUTABLE")
+            .ok()
+            .or_else(|| self.stt.as_ref().and_then(|s| s.executable.clone()))
+            .unwrap_or_else(|| "voxtype".to_string())
+    }
+
+    fn vad_silence_threshold_ms(&self) -> u64 {
+        env::var("WRAITH_VAD_SILENCE_MS")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.vad.as_ref().and_then(|v| v.silence_threshold_ms))
+            .unwrap_or(3000)
+    }
+
+    fn vad_volume_threshold_speaking(&self) -> f64 {
+        env::var("WRAITH_VAD_VOLUME_SPEAKING")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.vad.as_ref().and_then(|v| v.volume_threshold_speaking))
+            .unwrap_or(5.0)
+    }
+
+    fn vad_volume_threshold_interrupt(&self) -> f64 {
+        env::var("WRAITH_VAD_VOLUME_INTERRUPT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.vad.as_ref().and_then(|v| v.volume_threshold_interrupt))
+            .unwrap_or(8.0)
+    }
+
+    fn vad_min_recording_duration_ms(&self) -> u64 {
+        env::var("WRAITH_VAD_MIN_RECORDING_MS")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.vad.as_ref().and_then(|v| v.min_recording_duration_ms))
+            .unwrap_or(500)
+    }
+
+    fn cert_path(&self) -> String {
+        env::var("WRAITH_CERT_PATH")
+            .ok()
+            .or_else(|| self.security.as_ref().and_then(|s| s.cert_path.clone()))
+            .unwrap_or_else(|| "cert.pem".to_string())
+    }
+
+    fn key_path(&self) -> String {
+        env::var("WRAITH_KEY_PATH")
+            .ok()
+            .or_else(|| self.security.as_ref().and_then(|s| s.key_path.clone()))
+            .unwrap_or_else(|| "key.pem".to_string())
+    }
+}
+
+fn get_config_path() -> Option<PathBuf> {
+    if let Ok(path) = env::var("WRAITH_CONFIG") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_path = config_dir.join("wraith").join("wraith.toml");
+        if config_path.exists() {
+            return Some(config_path);
+        }
+    }
+
+    let local_config = PathBuf::from(".wraith.toml");
+    if local_config.exists() {
+        return Some(local_config);
+    }
+
+    None
+}
+
+fn load_config() -> Config {
+    if let Some(config_path) = get_config_path() {
+        match fs::read_to_string(&config_path) {
+            Ok(contents) => match toml::from_str(&contents) {
+                Ok(config) => {
+                    println!("Loaded config from: {}", config_path.display());
+                    return config;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to parse config file '{}': {}",
+                        config_path.display(),
+                        e
+                    );
+                }
+            },
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to read config file '{}': {}",
+                    config_path.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    println!("Using default configuration (no config file found)");
+    Config {
+        server: None,
+        llm: None,
+        tts: None,
+        stt: None,
+        vad: None,
+        security: None,
+    }
+}
+
+fn print_config_info(config: &Config) {
+    println!();
+    println!("╔════════════════════════════════════════════════════════╗");
+    println!("║                    WRAITH CONFIG                        ║");
+    println!("╚════════════════════════════════════════════════════════╝");
+    println!();
+    println!("  Server");
+    println!("    Host:     {}", config.server_host());
+    println!("    Port:     {}", config.server_port());
+    println!();
+    println!("  LLM");
+    println!("    Model:    {}", config.llm_model());
+    println!("    Endpoint: {}", config.llm_endpoint());
+    println!();
+    println!("  TTS");
+    println!("    Model:    {}", config.tts_model());
+    println!();
+    println!("  STT");
+    println!("    Executable: {}", config.stt_executable());
+    println!();
+    println!("  VAD (Voice Activity Detection)");
+    println!("    Silence Threshold:     {}ms", config.vad_silence_threshold_ms());
+    println!("    Volume (Speaking):     {}", config.vad_volume_threshold_speaking());
+    println!("    Volume (Interrupt):    {}", config.vad_volume_threshold_interrupt());
+    println!("    Min Recording:         {}ms", config.vad_min_recording_duration_ms());
+    println!();
+    println!("  Security");
+    println!("    Cert: {}", config.cert_path());
+    println!("    Key:  {}", config.key_path());
+    println!();
+    println!("  Override with env vars: WRAITH_*");
+    println!();
 }
 
 fn create_app() -> Router {
@@ -66,36 +272,44 @@ async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
 
 #[tokio::main]
 async fn main() {
+    let config = load_config();
+    print_config_info(&config);
+
     let app = create_app();
-    
-    let https_addr: SocketAddr = "0.0.0.0:2026".parse().unwrap();
-    let cert_path = "cert.pem";
-    let key_path = "key.pem";
-    
-    if fs::metadata(cert_path).is_ok() && fs::metadata(key_path).is_ok() {
+
+    let https_addr: SocketAddr = format!("{}:{}", config.server_host(), config.server_port())
+        .parse()
+        .unwrap();
+
+    let cert_path = config.cert_path();
+    let key_path = config.key_path();
+
+    if fs::metadata(&cert_path).is_ok() && fs::metadata(&key_path).is_ok() {
         println!("Found TLS certificates, starting HTTPS server...");
-        
-        let tls_config = match RustlsConfig::from_pem_file(cert_path, key_path).await {
+
+        let tls_config = match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
             Ok(config) => config,
             Err(e) => {
                 eprintln!("Failed to load TLS certificates: {e}");
-                eprintln!("Place cert.pem and key.pem in the project directory.");
+                eprintln!("Place {} and {} in the project directory.", cert_path, key_path);
                 std::process::exit(1);
             }
         };
-        
+
         println!();
-        println!("========================================");
-        println!("WRAITH is running!");
+        println!("╔════════════════════════════════════════════════════════╗");
+        println!("║              WRAITH is running!                        ║");
+        println!("╠════════════════════════════════════════════════════════╣");
+        println!("║                                                        ║");
+        let port = config.server_port();
+        println!("║   HTTPS: https://127.0.0.1:{}                           ║", port);
+        println!("║   HTTPS: https://YOUR_IP:{} (for mobile)             ║", port);
+        println!("║                                                        ║");
+        println!("║   Note: Accept the self-signed certificate warning.   ║");
+        println!("║                                                        ║");
+        println!("╚════════════════════════════════════════════════════════╝");
         println!();
-        println!("  HTTPS: https://127.0.0.1:2026");
-        println!("  HTTPS: https://YOUR_IP:2026 (for mobile)");
-        println!();
-        println!("Note: Accept the self-signed certificate");
-        println!("warning in your browser.");
-        println!("========================================");
-        println!();
-        
+
         serve_https(https_addr, tls_config, app).await;
     } else {
         println!();
@@ -103,7 +317,7 @@ async fn main() {
         println!();
         println!("Generate certificates with:");
         println!("  openssl req -x509 -newkey rsa:4096 \\");
-        println!("    -keyout key.pem -out cert.pem \\");
+        println!("    -keyout {} -out {} \\", key_path, cert_path);
         println!("    -days 365 -nodes");
         println!();
         println!("Then run: cargo run --release");
@@ -113,13 +327,15 @@ async fn main() {
 }
 
 async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
+    let config = load_config();
+
     if payload.text.trim().is_empty() {
         return Html(String::new());
     }
 
     let mut child = Command::new("piper-tts")
         .arg("--model")
-        .arg("/home/goitseone/piper-voices/en_US-libritts_r-high.onnx")
+        .arg(&config.tts_model())
         .arg("--output_file")
         .arg("-")
         .stdin(Stdio::piped())
@@ -128,26 +344,20 @@ async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
         .expect("Failed to spawn piper-tts");
 
     if let Some(mut stdin) = child.stdin.take() {
-        // Strip basic markdown syntax from LLM output so Piper TTS doesn't read the asterisks/hashes out loud
         let mut clean_text = payload.text;
 
-        // 1. Remove large code blocks
         let re_code = regex::Regex::new(r"```[\s\S]*?```").unwrap();
         clean_text = re_code.replace_all(&clean_text, "").to_string();
 
-        // 2. Remove inline code
         let re_inline_code = regex::Regex::new(r"`[^`]*`").unwrap();
         clean_text = re_inline_code.replace_all(&clean_text, "").to_string();
 
-        // 3. Remove bold/italics
         let re_bold_italic = regex::Regex::new(r"(\*\*|__|\*|_)").unwrap();
         clean_text = re_bold_italic.replace_all(&clean_text, "").to_string();
 
-        // 4. Remove headers
         let re_header = regex::Regex::new(r"(?m)^#+\s*").unwrap();
         clean_text = re_header.replace_all(&clean_text, "").to_string();
 
-        // 5. Replace newlines with spaces to ensure piper-tts processes text as a single sequence
         let single_line_text = clean_text.replace("\n", " ");
 
         stdin
@@ -177,7 +387,8 @@ async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
 }
 
 async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
-    // 1. Decode base64 audio
+    let config = load_config();
+
     let audio_data = match BASE64_STANDARD.decode(&payload.audio_base64) {
         Ok(data) => data,
         Err(e) => {
@@ -186,7 +397,6 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
         }
     };
 
-    // 2. Write to a temporary file
     let mut temp_file = match NamedTempFile::new() {
         Ok(file) => file,
         Err(e) => {
@@ -212,38 +422,53 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
     let wav_path = wav_file.path().to_str().unwrap().to_string();
 
     let ffmpeg_status = Command::new("ffmpeg")
-        .arg("-y") // overwrite output file just in case
+        .arg("-y")
         .arg("-i")
-        .arg(&temp_path) // input file (webm/ogg)
+        .arg(&temp_path)
         .arg("-ar")
-        .arg("16000") // 16kHz sampling rate
+        .arg("16000")
         .arg("-ac")
-        .arg("1") // Mono channel
-        .arg(&wav_path) // output wav file
-        .stdout(Stdio::null()) // suppress noisy ffmpeg stdout
+        .arg("1")
+        .arg(&wav_path)
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .status()
-        .expect("Failed to execute ffmpeg");
+        .status();
+
+    let ffmpeg_status = match ffmpeg_status {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!("Failed to execute ffmpeg: {}", e);
+            return Html(String::from("Transcription failed: ffmpeg not found."));
+        }
+    };
 
     if !ffmpeg_status.success() {
         eprintln!("ffmpeg failed to convert audio format");
         return Html(String::from("Transcription failed: invalid audio format."));
     }
 
-    // 3. Run voxtype transcribe
-    let output = Command::new("voxtype")
+    let stt_executable = config.stt_executable();
+    let output = Command::new(&stt_executable)
         .arg("--quiet")
         .arg("transcribe")
         .arg(&wav_path)
         .stdout(Stdio::piped())
-        .output()
-        .expect("Failed to execute voxtype");
+        .output();
 
-    // 4. Return the transcribed text
+    let output = match output {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!("Failed to execute {}: {}", stt_executable, e);
+            return Html(String::from(&format!(
+                "Transcription failed: {} not found.",
+                stt_executable
+            )));
+        }
+    };
+
     if output.status.success() {
         let text = String::from_utf8_lossy(&output.stdout).to_string();
 
-        // Strip voxtype stdout logs which end with an empty double newline "\n\n"
         let clean_text = text
             .split("\n\n")
             .last()
@@ -253,31 +478,32 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
 
         Html(clean_text)
     } else {
-        eprintln!("voxtype failed with status: {}", output.status);
+        eprintln!("{} failed with status: {}", stt_executable, output.status);
         if let Ok(err_str) = String::from_utf8(output.stderr) {
-            eprintln!("voxtype stderr: {}", err_str);
+            eprintln!("{} stderr: {}", stt_executable, err_str);
         }
         Html(String::from("Transcription failed."))
     }
 }
 
 async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
+    let config = load_config();
+
     if payload.text.trim().is_empty() {
         return Html(String::new());
     }
 
     let client = reqwest::Client::new();
     let request_body = json!({
-        // "model": "qwen/qwen3-vl-4b",
-        "model": "liquid/lfm2.5-1.2b",
+        "model": config.llm_model(),
         "messages": [
             {
                 "role": "system",
                 "content": "You are a concise, highly efficient, and direct AI
-                    assistant, inspired by sleek futuristic interfaces like 
-                    Grok and SpaceX. Respond with crisp, accurate information 
-                    without run-on sentences or unnecessary filler. note: your 
-                    response is going to be read outloud by a text to speech model, 
+                    assistant, inspired by sleek futuristic interfaces like
+                    Grok and SpaceX. Respond with crisp, accurate information
+                    without run-on sentences or unnecessary filler. note: your
+                    response is going to be read outloud by a text to speech model,
                     so no emojis or markdown respond in a way that a text to speech model can read."
             },
             {
@@ -290,8 +516,9 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
         "stream": false
     });
 
+    let endpoint = config.llm_endpoint();
     let res = client
-        .post("http://localhost:1234/v1/chat/completions")
+        .post(&endpoint)
         .json(&request_body)
         .send()
         .await;
@@ -308,7 +535,7 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
             Html(String::from("Error: Failed to parse AI response."))
         }
         Err(e) => {
-            eprintln!("Reqwest error calling LMStudio: {}", e);
+            eprintln!("Reqwest error calling LLM: {}", e);
             Html(String::from("Error connecting to AI Server."))
         }
     }
@@ -318,12 +545,40 @@ async fn home() -> Html<String> {
     let home_page =
         fs::read_to_string("/home/goitseone/Projects/project-asteria/wraith/src/index.html");
     match home_page {
-        Ok(page) => {
-            return Html(String::from(page));
-        }
+        Ok(page) => Html(String::from(page)),
         Err(err) => {
             println!("Error reading index.html : {err}");
-            return Html(String::from("File not found :("));
+            Html(String::from("File not found :("))
         }
     }
+}
+
+#[derive(Deserialize)]
+struct SynthesizeRequest {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct TranscribeRequest {
+    audio_base64: String,
+}
+
+#[derive(Deserialize)]
+struct ChatRequest {
+    text: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct LmStudioResponse {
+    choices: Vec<LmStudioChoice>,
+}
+
+#[derive(Deserialize, Debug)]
+struct LmStudioChoice {
+    message: LmStudioMessage,
+}
+
+#[derive(Deserialize, Debug)]
+struct LmStudioMessage {
+    content: String,
 }
