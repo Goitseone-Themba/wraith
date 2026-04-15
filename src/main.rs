@@ -163,6 +163,11 @@ fn get_config_path() -> Option<PathBuf> {
         if path.exists() {
             return Some(path);
         }
+
+        panic!(
+            "WRAITH_CONFIG is set to '{}', but that file does not exist",
+            path.display()
+        );
     }
 
     if let Some(config_dir) = dirs::config_dir() {
