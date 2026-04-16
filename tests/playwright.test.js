@@ -1335,28 +1335,42 @@ async function testAudioSourceReuse() {
     const initialState = await page.evaluate(() => {
         let microphoneSourceReassignable = false;
         let analyserNodeReassignable = false;
+        const microphoneSourceStartsNull = microphoneSource === null || typeof microphoneSource === 'undefined';
+        const analyserNodeStartsNull = analyserNode === null || typeof analyserNode === 'undefined';
 
+        const originalMicrophoneSource = microphoneSource;
         try {
-            const originalMicrophoneSource = microphoneSource;
-            microphoneSource = originalMicrophoneSource;
+            microphoneSource = null;
             microphoneSourceReassignable = true;
         } catch (e) {
-            microphoneSourceReassignable = false;
+            // Expected when variable is not reassignable (e.g., const)
+        } finally {
+            try {
+                microphoneSource = originalMicrophoneSource;
+            } catch (restoreError) {
+                // Ignore restore errors to keep this mutability probe non-fatal
+            }
         }
 
+        const originalAnalyserNode = analyserNode;
         try {
-            const originalAnalyserNode = analyserNode;
-            analyserNode = originalAnalyserNode;
+            analyserNode = null;
             analyserNodeReassignable = true;
         } catch (e) {
-            analyserNodeReassignable = false;
+            // Expected when variable is not reassignable (e.g., const)
+        } finally {
+            try {
+                analyserNode = originalAnalyserNode;
+            } catch (restoreError) {
+                // Ignore restore errors to keep this mutability probe non-fatal
+            }
         }
 
         return {
             microphoneSourceIsLet: microphoneSourceReassignable,
             analyserNodeIsLet: analyserNodeReassignable,
-            microphoneSourceNull: microphoneSource === null || typeof microphoneSource === 'undefined',
-            analyserNodeNull: analyserNode === null || typeof analyserNode === 'undefined'
+            microphoneSourceNull: microphoneSourceStartsNull,
+            analyserNodeNull: analyserNodeStartsNull
         };
     });
     
