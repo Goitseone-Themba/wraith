@@ -767,14 +767,19 @@
         async function synthesize(text) {
             const params = new URLSearchParams();
             params.append('text', text);
-            const res = await fetch(`${baseUrl}synthesize`, { method: 'POST', body: params });
-            const html = await res.text();
-            if (html.startsWith('ERROR:')) {
-                console.error('TTS error:', html.replace('ERROR:', ''));
+            try {
+                const res = await fetch(`${baseUrl}synthesize`, { method: 'POST', body: params });
+                const html = await res.text();
+                if (html.startsWith('ERROR:')) {
+                    console.error('TTS error:', html.replace('ERROR:', ''));
+                    return null;
+                }
+                const match = html.match(/src="([^"]+)"/);
+                return match ? match[1].split(',')[1] : null;
+            } catch (err) {
+                console.error('TTS network error:', err);
                 return null;
             }
-            const match = html.match(/src="([^"]+)"/);
-            return match ? match[1].split(',')[1] : null;
         }
 
         async function sendMessage() {
