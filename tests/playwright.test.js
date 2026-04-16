@@ -1331,11 +1331,30 @@ async function testAudioSourceReuse() {
     logTest('startVoiceCallLoop does NOT set analyserNode to null', !loopDisconnectsAnalyser.setsAnalyserNull,
         'Reuses existing analyserNode');
 
-    // Test 19.4: Global audio objects exist and are initially null
+    // Test 19.4: Global audio objects exist and are initially null/reassignable
     const initialState = await page.evaluate(() => {
+        let microphoneSourceReassignable = false;
+        let analyserNodeReassignable = false;
+
+        try {
+            const originalMicrophoneSource = microphoneSource;
+            microphoneSource = originalMicrophoneSource;
+            microphoneSourceReassignable = true;
+        } catch (e) {
+            microphoneSourceReassignable = false;
+        }
+
+        try {
+            const originalAnalyserNode = analyserNode;
+            analyserNode = originalAnalyserNode;
+            analyserNodeReassignable = true;
+        } catch (e) {
+            analyserNodeReassignable = false;
+        }
+
         return {
-            microphoneSourceIsLet: !document.body.innerHTML.includes('const microphoneSource'),
-            analyserNodeIsLet: !document.body.innerHTML.includes('const analyserNode'),
+            microphoneSourceIsLet: microphoneSourceReassignable,
+            analyserNodeIsLet: analyserNodeReassignable,
             microphoneSourceNull: microphoneSource === null || typeof microphoneSource === 'undefined',
             analyserNodeNull: analyserNode === null || typeof analyserNode === 'undefined'
         };
@@ -1345,6 +1364,10 @@ async function testAudioSourceReuse() {
         'Can be reassigned for reuse');
     logTest('analyserNode declared as let (not const)', initialState.analyserNodeIsLet,
         'Can be reused across loops');
+    logTest('microphoneSource starts as null/undefined', initialState.microphoneSourceNull,
+        'Initial source state is empty before attachMic');
+    logTest('analyserNode starts as null/undefined', initialState.analyserNodeNull,
+        'Initial analyser state is empty before attachMic');
 }
 
 /**
