@@ -1138,19 +1138,19 @@ async function testGracefulDegradation() {
     
     // Test 17.8: Error messages are user-friendly (not raw codes)
     const userFriendlyErrors = await page.evaluate(() => {
-        // Check that error handling code exists
-        const code = document.body.innerHTML;
+        // Check visible UI text rather than raw HTML/source code
+        const visibleText = document.body.innerText || '';
         return {
-            hasErrorPrefix: code.includes('ERROR:'),
-            hasTranscriptionFailed: code.includes('Transcription failed:'),
-            hasVoiceUnavailable: code.includes('Voice unavailable'),
-            hasTextOnly: code.includes('text only')
+            hasErrorPrefix: visibleText.includes('ERROR:'),
+            hasTranscriptionFailed: visibleText.includes('Transcription failed:'),
+            hasVoiceUnavailable: visibleText.includes('Voice unavailable'),
+            hasTextOnly: visibleText.includes('text only')
         };
     });
     
     logTest('Error messages are user-friendly', 
         userFriendlyErrors.hasTranscriptionFailed || userFriendlyErrors.hasVoiceUnavailable,
-        'Shows "Transcription failed:" instead of raw "ERROR:"');
+        'Checks visible error text instead of matching source strings in page HTML');
     
     // Test 17.9: Frontend doesn't crash on network errors
     const networkErrorHandling = await page.evaluate(() => {
