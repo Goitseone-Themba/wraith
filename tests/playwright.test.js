@@ -1273,6 +1273,118 @@ async function testVadConfigWiring() {
 }
 
 /**
+ * TEST SUITE 19: Audio Source Reuse
+ */
+async function testAudioSourceReuse() {
+    console.log('\n═══════════════════════════════════════════');
+    console.log('TEST SUITE 19: Audio Source Reuse');
+    console.log('═══════════════════════════════════════════\n');
+
+    // Test 19.1: Check attachMic reuses microphoneSource
+    const attachMicReusesSource = await page.evaluate(() => {
+        const source = attachMic.toString();
+        return {
+            hasNullCheck: source.includes('if (!microphoneSource)'),
+            createsOnce: source.includes('microphoneSource = audioContext.createMediaStreamSource'),
+            hasDisconnect: source.includes('microphoneSource.disconnect'),
+            hasConnect: source.includes('microphoneSource.connect')
+        };
+    });
+    
+    logTest('attachMic checks if microphoneSource exists', attachMicReusesSource.hasNullCheck,
+        'Only creates new source if none exists');
+    logTest('attachMic creates microphoneSource once', attachMicReusesSource.createsOnce,
+        'Can reuse existing source');
+    logTest('attachMic disconnects before reconnecting', attachMicReusesSource.hasDisconnect,
+        'Properly disconnects existing source');
+    logTest('attachMic reconnects source', attachMicReusesSource.hasConnect,
+        'Connects to analyserNode');
+
+    // Test 19.2: Check analyserNode reuse
+    const analyserReuse = await page.evaluate(() => {
+        const source = attachMic.toString();
+        return {
+            createsAnalyser: source.includes('analyserNode = audioContext.createAnalyser'),
+            checksExists: source.includes('if (!analyserNode)'),
+            setsFftSize: source.includes('fftSize')
+        };
+    });
+    
+    logTest('analyserNode is created if missing', analyserReuse.createsAnalyser,
+        'Creates new analyser when needed');
+    logTest('analyserNode is checked for existence', analyserReuse.checksExists,
+        'Only creates if not already existing');
+    logTest('analyserNode fftSize is set', analyserReuse.setsFftSize,
+        'FFT size configured');
+
+    // Test 19.3: startVoiceCallLoop disconnects but doesn't destroy analyser
+    const loopDisconnectsAnalyser = await page.evaluate(() => {
+        const source = startVoiceCallLoop.toString();
+        return {
+            disconnectsAnalyser: source.includes('analyserNode.disconnect()'),
+            setsAnalyserNull: source.includes('analyserNode = null')
+        };
+    });
+    
+    logTest('startVoiceCallLoop disconnects analyserNode', loopDisconnectsAnalyser.disconnectsAnalyser,
+        'Disconnects to allow reconnection');
+    logTest('startVoiceCallLoop does NOT set analyserNode to null', !loopDisconnectsAnalyser.setsAnalyserNull,
+        'Reuses existing analyserNode');
+
+    // Test 19.4: Global audio objects exist and are initially null/reassignable
+    const initialState = await page.evaluate(() => {
+        let microphoneSourceReassignable = false;
+        let analyserNodeReassignable = false;
+        const microphoneSourceStartsNull = microphoneSource === null || typeof microphoneSource === 'undefined';
+        const analyserNodeStartsNull = analyserNode === null || typeof analyserNode === 'undefined';
+
+        const originalMicrophoneSource = microphoneSource;
+        try {
+            microphoneSource = null;
+            microphoneSourceReassignable = true;
+        } catch (e) {
+            // Expected when variable is not reassignable (e.g., const)
+        } finally {
+            try {
+                microphoneSource = originalMicrophoneSource;
+            } catch (restoreError) {
+                // Ignore restore errors to keep this mutability probe non-fatal
+            }
+        }
+
+        const originalAnalyserNode = analyserNode;
+        try {
+            analyserNode = null;
+            analyserNodeReassignable = true;
+        } catch (e) {
+            // Expected when variable is not reassignable (e.g., const)
+        } finally {
+            try {
+                analyserNode = originalAnalyserNode;
+            } catch (restoreError) {
+                // Ignore restore errors to keep this mutability probe non-fatal
+            }
+        }
+
+        return {
+            microphoneSourceIsLet: microphoneSourceReassignable,
+            analyserNodeIsLet: analyserNodeReassignable,
+            microphoneSourceNull: microphoneSourceStartsNull,
+            analyserNodeNull: analyserNodeStartsNull
+        };
+    });
+    
+    logTest('microphoneSource declared as let (not const)', initialState.microphoneSourceIsLet,
+        'Can be reassigned for reuse');
+    logTest('analyserNode declared as let (not const)', initialState.analyserNodeIsLet,
+        'Can be reused across loops');
+    logTest('microphoneSource starts as null/undefined', initialState.microphoneSourceNull,
+        'Initial source state is empty before attachMic');
+    logTest('analyserNode starts as null/undefined', initialState.analyserNodeNull,
+        'Initial analyser state is empty before attachMic');
+}
+
+/**
  * Run all tests
  */
 async function runAllTests() {
@@ -1305,6 +1417,7 @@ async function runAllTests() {
         await testKnownIssues();
         await testGracefulDegradation();
         await testVadConfigWiring();
+        await testAudioSourceReuse();
         
         await teardownBrowser();
         

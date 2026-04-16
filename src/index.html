@@ -666,13 +666,16 @@
                 if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioContext.state === 'suspended') await audioContext.resume();
 
-                if (microphoneSource) microphoneSource.disconnect();
-                microphoneSource = audioContext.createMediaStreamSource(globalMediaStream);
+                if (!microphoneSource) {
+                    microphoneSource = audioContext.createMediaStreamSource(globalMediaStream);
+                }
 
                 if (!analyserNode) {
                     analyserNode = audioContext.createAnalyser();
                     analyserNode.fftSize = 256;
                 }
+
+                microphoneSource.disconnect();
                 microphoneSource.connect(analyserNode);
 
                 const mimeType = getSupportedMimeType();
