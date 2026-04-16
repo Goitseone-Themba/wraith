@@ -675,10 +675,8 @@
                     analyserNode.fftSize = 256;
                 }
 
-                if (microphoneSource.context.state !== 'suspended') {
-                    microphoneSource.disconnect();
-                    microphoneSource.connect(analyserNode);
-                }
+                microphoneSource.disconnect();
+                microphoneSource.connect(analyserNode);
 
                 const mimeType = getSupportedMimeType();
                 mediaRecorder = new MediaRecorder(globalMediaStream, { mimeType });
