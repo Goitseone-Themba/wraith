@@ -273,6 +273,7 @@ fn create_app() -> Router {
         .route("/synthesize", post(synthesize))
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
+        .route("/vad-config", get(vad_config))
         .route("/", get(home))
         .layer(cors)
 }
@@ -662,6 +663,16 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
             Html(String::from("Error connecting to AI Server."))
         }
     }
+}
+
+async fn vad_config() -> axum::Json<serde_json::Value> {
+    let config = cached_config();
+    axum::Json(serde_json::json!({
+        "silence_threshold_ms": config.vad_silence_threshold_ms(),
+        "volume_threshold_speaking": config.vad_volume_threshold_speaking(),
+        "volume_threshold_interrupt": config.vad_volume_threshold_interrupt(),
+        "min_recording_duration_ms": config.vad_min_recording_duration_ms()
+    }))
 }
 
 async fn home() -> Html<String> {

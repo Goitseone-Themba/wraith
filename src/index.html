@@ -511,10 +511,34 @@
         let isProcessingCallQuery = false;
         let currentAudio = null;
 
-        const VOLUME_THRESHOLD_SPEAKING = 5.0;
-        const VOLUME_THRESHOLD_INTERRUPT = 8.0;
-        const SILENCE_MS_THRESHOLD = 3000;
+        let VOLUME_THRESHOLD_SPEAKING = 5.0;
+        let VOLUME_THRESHOLD_INTERRUPT = 8.0;
+        let SILENCE_MS_THRESHOLD = 3000;
+        let MIN_RECORDING_MS = 500;
         let lastSpeakTimestamp = 0;
+        let totalSpeechMs = 0;
+        let recordingStartTime = 0;
+
+        async function loadVadConfig() {
+            try {
+                const res = await fetch(`${baseUrl}vad-config`);
+                if (res.ok) {
+                    const config = await res.json();
+                    VOLUME_THRESHOLD_SPEAKING = config.volume_threshold_speaking ?? 5.0;
+                    VOLUME_THRESHOLD_INTERRUPT = config.volume_threshold_interrupt ?? 8.0;
+                    SILENCE_MS_THRESHOLD = config.silence_threshold_ms ?? 3000;
+                    MIN_RECORDING_MS = config.min_recording_duration_ms ?? 500;
+                    console.log('[Wraith] VAD config loaded:', {
+                        silence_threshold_ms: SILENCE_MS_THRESHOLD,
+                        volume_threshold_speaking: VOLUME_THRESHOLD_SPEAKING,
+                        volume_threshold_interrupt: VOLUME_THRESHOLD_INTERRUPT,
+                        min_recording_duration_ms: MIN_RECORDING_MS
+                    });
+                }
+            } catch (e) {
+                console.warn('[Wraith] Could not load VAD config, using defaults:', e);
+            }
+        }
 
         for (let i = 0; i < 20; i++) {
             const bar = document.createElement('div');
@@ -522,6 +546,8 @@
             bar.style.height = '8px';
             waveform.appendChild(bar);
         }
+
+        loadVadConfig();
 
         function setStatus(text, active = false) {
             systemStatus.textContent = text;
@@ -969,6 +995,8 @@
             audioChunks = [];
             isRecordingCall = true;
             lastSpeakTimestamp = Date.now();
+            recordingStartTime = Date.now();
+            totalSpeechMs = 0;
             mediaRecorder.start();
             vadRafId = requestAnimationFrame(tickVAD);
         }
@@ -998,13 +1026,26 @@
                 if (isRecordingCall && !isProcessingCallQuery) {
                     if (rms > VOLUME_THRESHOLD_SPEAKING) {
                         lastSpeakTimestamp = now;
+                        totalSpeechMs += 16;
                         transcriptionPreview.textContent = 'Listening...';
                     } else {
                         const silent = now - lastSpeakTimestamp;
                         if (silent > SILENCE_MS_THRESHOLD) {
-                            stopRecordingAndProcess();
+                            if (totalSpeechMs >= MIN_RECORDING_MS) {
+                                stopRecordingAndProcess();
+                            } else {
+                                transcriptionPreview.textContent = 'Speak more...';
+                                totalSpeechMs = 0;
+                                lastSpeakTimestamp = now;
+                            }
                         } else if (silent > 1000) {
-                            transcriptionPreview.textContent = `Speak or wait... (${((SILENCE_MS_THRESHOLD - silent) / 1000).toFixed(1)}s)`;
+                            const remaining = SILENCE_MS_THRESHOLD - silent;
+                            if (totalSpeechMs < MIN_RECORDING_MS) {
+                                const needed = MIN_RECORDING_MS - totalSpeechMs;
+                                transcriptionPreview.textContent = `Speak more (${(needed / 1000).toFixed(1)}s more needed)...`;
+                            } else {
+                                transcriptionPreview.textContent = `Speak or wait... (${(remaining / 1000).toFixed(1)}s)`;
+                            }
                         }
                     }
                 } else if (!isRecordingCall && currentAudio && !currentAudio.paused) {

@@ -1168,6 +1168,111 @@ async function testGracefulDegradation() {
 }
 
 /**
+ * TEST SUITE 18: VAD Config Wiring
+ */
+async function testVadConfigWiring() {
+    console.log('\n═══════════════════════════════════════════');
+    console.log('TEST SUITE 18: VAD Config Wiring');
+    console.log('═══════════════════════════════════════════\n');
+
+    // Test 18.1: /vad-config endpoint exists and returns JSON
+    const vadConfigResponse = await page.evaluate(async () => {
+        try {
+            const res = await fetch(`${baseUrl}vad-config`);
+            if (!res.ok) return { success: false, status: res.status };
+            const json = await res.json();
+            return {
+                success: true,
+                hasSilenceThreshold: 'silence_threshold_ms' in json,
+                hasVolumeSpeaking: 'volume_threshold_speaking' in json,
+                hasVolumeInterrupt: 'volume_threshold_interrupt' in json,
+                hasMinRecording: 'min_recording_duration_ms' in json,
+                data: json
+            };
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    logTest('vad-config endpoint returns valid JSON', vadConfigResponse.success,
+        `Status: ${vadConfigResponse.status || 'OK'}`);
+    logTest('vad-config has silence_threshold_ms', vadConfigResponse.hasSilenceThreshold,
+        `Value: ${vadConfigResponse.data?.silence_threshold_ms}`);
+    logTest('vad-config has volume_threshold_speaking', vadConfigResponse.hasVolumeSpeaking,
+        `Value: ${vadConfigResponse.data?.volume_threshold_speaking}`);
+    logTest('vad-config has volume_threshold_interrupt', vadConfigResponse.hasVolumeInterrupt,
+        `Value: ${vadConfigResponse.data?.volume_threshold_interrupt}`);
+    logTest('vad-config has min_recording_duration_ms', vadConfigResponse.hasMinRecording,
+        `Value: ${vadConfigResponse.data?.min_recording_duration_ms}`);
+
+    // Test 18.2: Frontend has loadVadConfig function
+    const hasLoadVadConfig = await page.evaluate(() => typeof loadVadConfig === 'function');
+    logTest('loadVadConfig function exists', hasLoadVadConfig,
+        'Frontend can load VAD config from server');
+
+    // Test 18.3: Frontend has VAD config variables (not hardcoded)
+    const vadVariables = await page.evaluate(() => {
+        return {
+            isSpeakingVar: typeof VOLUME_THRESHOLD_SPEAKING !== 'undefined',
+            isInterruptVar: typeof VOLUME_THRESHOLD_INTERRUPT !== 'undefined',
+            isSilenceVar: typeof SILENCE_MS_THRESHOLD !== 'undefined',
+            isMinRecordingVar: typeof MIN_RECORDING_MS !== 'undefined',
+            isTotalSpeechMs: typeof totalSpeechMs !== 'undefined',
+            isRecordingStartTime: typeof recordingStartTime !== 'undefined'
+        };
+    });
+    logTest('VOLUME_THRESHOLD_SPEAKING is configurable', vadVariables.isSpeakingVar,
+        'Can be set from config');
+    logTest('VOLUME_THRESHOLD_INTERRUPT is configurable', vadVariables.isInterruptVar,
+        'Can be set from config');
+    logTest('SILENCE_MS_THRESHOLD is configurable', vadVariables.isSilenceVar,
+        'Can be set from config');
+    logTest('MIN_RECORDING_MS is configurable', vadVariables.isMinRecordingVar,
+        'Can be set from config');
+    logTest('totalSpeechMs tracking exists', vadVariables.isTotalSpeechMs,
+        'Tracks speech duration');
+    logTest('recordingStartTime tracking exists', vadVariables.isRecordingStartTime,
+        'Tracks recording start');
+
+    // Test 18.4: Config values match defaults when no config file
+    const configValues = await page.evaluate(() => {
+        return {
+            silenceThreshold: SILENCE_MS_THRESHOLD,
+            volumeSpeaking: VOLUME_THRESHOLD_SPEAKING,
+            volumeInterrupt: VOLUME_THRESHOLD_INTERRUPT,
+            minRecording: MIN_RECORDING_MS
+        };
+    });
+
+    const defaultsMatch = configValues.silenceThreshold === 3000 &&
+                         configValues.volumeSpeaking === 5.0 &&
+                         configValues.volumeInterrupt === 8.0 &&
+                         configValues.minRecording === 500;
+    logTest('VAD defaults match expected values', defaultsMatch,
+        `Silence: ${configValues.silenceThreshold}ms, Speaking: ${configValues.volumeSpeaking}, Interrupt: ${configValues.volumeInterrupt}, MinRec: ${configValues.minRecording}ms`);
+
+    // Test 18.5: tickVAD uses configurable thresholds
+    const tickVadUsesConfig = await page.evaluate(() => {
+        // Verify tickVAD references the variables (not hardcoded values)
+        const funcSource = tickVAD.toString();
+        return {
+            usesSpeakingThreshold: funcSource.includes('VOLUME_THRESHOLD_SPEAKING'),
+            usesInterruptThreshold: funcSource.includes('VOLUME_THRESHOLD_INTERRUPT'),
+            usesSilenceThreshold: funcSource.includes('SILENCE_MS_THRESHOLD'),
+            usesMinRecording: funcSource.includes('MIN_RECORDING_MS')
+        };
+    });
+    logTest('tickVAD uses VOLUME_THRESHOLD_SPEAKING', tickVadUsesConfig.usesSpeakingThreshold,
+        'Not hardcoded');
+    logTest('tickVAD uses VOLUME_THRESHOLD_INTERRUPT', tickVadUsesConfig.usesInterruptThreshold,
+        'Not hardcoded');
+    logTest('tickVAD uses SILENCE_MS_THRESHOLD', tickVadUsesConfig.usesSilenceThreshold,
+        'Not hardcoded');
+    logTest('tickVAD uses MIN_RECORDING_MS', tickVadUsesConfig.usesMinRecording,
+        'Minimum recording duration enforced');
+}
+
+/**
  * Run all tests
  */
 async function runAllTests() {
@@ -1199,6 +1304,7 @@ async function runAllTests() {
         await testAndroidPermissions();
         await testKnownIssues();
         await testGracefulDegradation();
+        await testVadConfigWiring();
         
         await teardownBrowser();
         
