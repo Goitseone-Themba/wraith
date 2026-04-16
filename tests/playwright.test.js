@@ -1038,7 +1038,7 @@ async function testGracefulDegradation() {
     console.log('═══════════════════════════════════════════\n');
 
     // Test 17.1: transcribe function handles error responses
-    const transcribeErrorHandling = await page.evaluate(() => {
+    const transcribeErrorHandling = await page.evaluate(async () => {
         // Mock the fetch response for transcribe
         const originalFetch = window.fetch;
         window.fetch = async (url, options) => {
@@ -1050,19 +1050,18 @@ async function testGracefulDegradation() {
             return originalFetch(url, options);
         };
         
-        // Call transcribe with test data
-        const result = transcribe('dGVzdA=='); // 'test' in base64
-        window.fetch = originalFetch;
-        
-        return result.then(text => {
+        try {
+            const text = await transcribe('dGVzdA=='); // 'test' in base64
             return {
                 returnsFallback: text.includes('Transcription failed:'),
                 logsError: true // Console errors are logged server-side
             };
-        });
+        } finally {
+            window.fetch = originalFetch;
+        }
     });
     
-    logTest('transcribe handles ERROR:FFMPEG_FAILED', true,
+    logTest('transcribe handles ERROR:FFMPEG_FAILED', transcribeErrorHandling.returnsFallback,
         'Returns user-friendly error message instead of raw error');
     
     // Test 17.2: transcribe handles STT failure
@@ -1072,7 +1071,7 @@ async function testGracefulDegradation() {
         });
     });
     
-    logTest('transcribe handles ERROR:STT_FAILED', true,
+    logTest('transcribe handles ERROR:STT_FAILED', transcribeSttFailure,
         'Returns user-friendly error for STT failure');
     
     // Test 17.3: transcribe handles empty transcription
@@ -1082,7 +1081,7 @@ async function testGracefulDegradation() {
         });
     });
     
-    logTest('transcribe handles empty result', true,
+    logTest('transcribe handles empty result', transcribeEmpty,
         'Returns empty string or error for empty transcription');
     
     // Test 17.4: synthesize function handles error responses
@@ -1092,7 +1091,7 @@ async function testGracefulDegradation() {
         });
     });
     
-    logTest('synthesize returns null on ERROR:TTS_FAILED', true,
+    logTest('synthesize returns null on ERROR:TTS_FAILED', synthesizeErrorHandling,
         'Frontend can check for null and handle gracefully');
     
     // Test 17.5: Voice call loop continues on transcription failure
@@ -1102,7 +1101,7 @@ async function testGracefulDegradation() {
         return typeof startVoiceCallLoop === 'function';
     });
     
-    logTest('Voice call loop can restart after failure', true,
+    logTest('Voice call loop can restart after failure', voiceLoopContinues,
         'startVoiceCallLoop function exists for loop continuation');
     
     // Test 17.6: sendMessage shows text-only fallback when TTS fails
@@ -1124,7 +1123,7 @@ async function testGracefulDegradation() {
         return wouldShowFallback;
     });
     
-    logTest('Text-only fallback mechanism exists', true,
+    logTest('Text-only fallback mechanism exists', textOnlyFallback,
         'Code can detect null audio and show text-only message');
     
     // Test 17.7: stopRecordingAndProcess restarts loop on failure
@@ -1133,7 +1132,7 @@ async function testGracefulDegradation() {
         return typeof stopRecordingAndProcess === 'function';
     });
     
-    logTest('stopRecordingAndProcess handles failures', true,
+    logTest('stopRecordingAndProcess handles failures', stopRecordingHandlesFailure,
         'Function exists and can be called on failure');
     
     // Test 17.8: Error messages are user-friendly (not raw codes)
