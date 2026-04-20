@@ -274,8 +274,17 @@ fn create_app() -> Router {
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
         .route("/vad-config", get(vad_config))
+        .route("/clear-history", post(clear_history_handler))
         .route("/", get(home))
         .layer(cors)
+}
+
+async fn get_history_handler() -> axum::Json<Vec<ChatMessage>> {
+    if let Ok(history) = get_chat_history().lock() {
+        axum::Json(history.clone())
+    } else {
+        axum::Json(vec![])
+    }
 }
 
 async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
@@ -618,23 +627,36 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
     }
 
     let client = reqwest::Client::new();
+    
+    let history = get_chat_history().lock().map(|h| h.clone()).unwrap_or_default();
+    
+    let mut messages = vec![
+        json!({
+            "role": "system",
+            "content": "You are a concise, highly efficient, and direct AI
+                assistant, inspired by sleek futuristic interfaces like
+                Grok and SpaceX. Respond with crisp, accurate information
+                without run-on sentences or unnecessary filler. note: your
+                response is going to be read outloud by a text to speech model,
+                so no emojis or markdown respond in a way that a text to speech model can read."
+        })
+    ];
+
+    for msg in history.iter().take(10) {
+        messages.push(json!({
+            "role": msg.role,
+            "content": msg.content
+        }));
+    }
+
+    messages.push(json!({
+        "role": "user",
+        "content": payload.text
+    }));
+
     let request_body = json!({
         "model": config.llm_model(),
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a concise, highly efficient, and direct AI
-                    assistant, inspired by sleek futuristic interfaces like
-                    Grok and SpaceX. Respond with crisp, accurate information
-                    without run-on sentences or unnecessary filler. note: your
-                    response is going to be read outloud by a text to speech model,
-                    so no emojis or markdown respond in a way that a text to speech model can read."
-            },
-            {
-                "role": "user",
-                "content": payload.text
-            }
-        ],
+        "messages": messages,
         "temperature": 0.7,
         "max_tokens": -1,
         "stream": false
@@ -652,7 +674,23 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
             if response.status().is_success() {
                 if let Ok(lm_res) = response.json::<LmStudioResponse>().await {
                     if let Some(choice) = lm_res.choices.first() {
-                        return Html(choice.message.content.clone());
+                        let content = choice.message.content.clone();
+                        
+                        if let Ok(mut history) = get_chat_history().lock() {
+                            history.push(ChatMessage {
+                                role: "user".to_string(),
+                                content: payload.text.clone()
+                            });
+                            history.push(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: content.clone()
+                            });
+                            if history.len() > 20 {
+                                history.drain(0..4);
+                            }
+                        }
+                        
+                        return Html(content);
                     }
                 }
             }
@@ -692,6 +730,25 @@ struct TranscribeRequest {
 #[derive(Deserialize)]
 struct ChatRequest {
     text: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+static CHAT_HISTORY: OnceLock<std::sync::Mutex<Vec<ChatMessage>>> = OnceLock::new();
+
+fn get_chat_history() -> &'static std::sync::Mutex<Vec<ChatMessage>> {
+    CHAT_HISTORY.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+async fn clear_history_handler() -> Html<String> {
+    if let Ok(mut history) = get_chat_history().lock() {
+        history.clear();
+    }
+    Html(String::from("History cleared"))
 }
 
 #[derive(Deserialize, Debug)]
