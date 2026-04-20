@@ -301,6 +301,11 @@ async fn main() {
     let config = load_config();
     print_config_info(&config);
     validate_external_tools(&config);
+    
+    let saved_history = load_history_from_disk();
+    if let Ok(mut history) = get_chat_history().lock() {
+        *history = saved_history;
+    }
 
     let app = create_app();
 
@@ -688,6 +693,7 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
                             if history.len() > 20 {
                                 history.drain(0..4);
                             }
+                            save_history_to_disk(&history);
                         }
                         
                         return Html(content);
@@ -732,7 +738,7 @@ struct ChatRequest {
     text: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct ChatMessage {
     role: String,
     content: String,
@@ -744,9 +750,40 @@ fn get_chat_history() -> &'static std::sync::Mutex<Vec<ChatMessage>> {
     CHAT_HISTORY.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 
+fn get_history_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("wraith").join("history.json"))
+}
+
+fn load_history_from_disk() -> Vec<ChatMessage> {
+    if let Some(path) = get_history_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(data) = fs::read_to_string(&path) {
+            if let Ok(history) = serde_json::from_str::<Vec<ChatMessage>>(&data) {
+                println!("[Wraith] Loaded {} messages from history", history.len());
+                return history;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_history_to_disk(history: &[ChatMessage]) {
+    if let Some(path) = get_history_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(data) = serde_json::to_string(history) {
+            let _ = fs::write(&path, data);
+        }
+    }
+}
+
 async fn clear_history_handler() -> Html<String> {
     if let Ok(mut history) = get_chat_history().lock() {
         history.clear();
+        save_history_to_disk(&[]);
     }
     Html(String::from("History cleared"))
 }
