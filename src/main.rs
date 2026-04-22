@@ -274,8 +274,17 @@ fn create_app() -> Router {
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
         .route("/vad-config", get(vad_config))
+        .route("/clear-history", post(clear_history_handler))
         .route("/", get(home))
         .layer(cors)
+}
+
+async fn get_history_handler() -> axum::Json<Vec<ChatMessage>> {
+    if let Ok(history) = get_chat_history().lock() {
+        axum::Json(history.clone())
+    } else {
+        axum::Json(vec![])
+    }
 }
 
 async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
@@ -292,6 +301,11 @@ async fn main() {
     let config = load_config();
     print_config_info(&config);
     validate_external_tools(&config);
+    
+    let saved_history = load_history_from_disk();
+    if let Ok(mut history) = get_chat_history().lock() {
+        *history = saved_history;
+    }
 
     let app = create_app();
 
@@ -618,23 +632,36 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
     }
 
     let client = reqwest::Client::new();
+    
+    let history = get_chat_history().lock().map(|h| h.clone()).unwrap_or_default();
+    
+    let mut messages = vec![
+        json!({
+            "role": "system",
+            "content": "You are a concise, highly efficient, and direct AI
+                assistant, inspired by sleek futuristic interfaces like
+                Grok and SpaceX. Respond with crisp, accurate information
+                without run-on sentences or unnecessary filler. note: your
+                response is going to be read outloud by a text to speech model,
+                so no emojis or markdown respond in a way that a text to speech model can read."
+        })
+    ];
+
+    for msg in history.iter().take(10) {
+        messages.push(json!({
+            "role": msg.role,
+            "content": msg.content
+        }));
+    }
+
+    messages.push(json!({
+        "role": "user",
+        "content": payload.text
+    }));
+
     let request_body = json!({
         "model": config.llm_model(),
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a concise, highly efficient, and direct AI
-                    assistant, inspired by sleek futuristic interfaces like
-                    Grok and SpaceX. Respond with crisp, accurate information
-                    without run-on sentences or unnecessary filler. note: your
-                    response is going to be read outloud by a text to speech model,
-                    so no emojis or markdown respond in a way that a text to speech model can read."
-            },
-            {
-                "role": "user",
-                "content": payload.text
-            }
-        ],
+        "messages": messages,
         "temperature": 0.7,
         "max_tokens": -1,
         "stream": false
@@ -652,7 +679,24 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
             if response.status().is_success() {
                 if let Ok(lm_res) = response.json::<LmStudioResponse>().await {
                     if let Some(choice) = lm_res.choices.first() {
-                        return Html(choice.message.content.clone());
+                        let content = choice.message.content.clone();
+                        
+                        if let Ok(mut history) = get_chat_history().lock() {
+                            history.push(ChatMessage {
+                                role: "user".to_string(),
+                                content: payload.text.clone()
+                            });
+                            history.push(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: content.clone()
+                            });
+                            if history.len() > 20 {
+                                history.drain(0..4);
+                            }
+                            save_history_to_disk(&history);
+                        }
+                        
+                        return Html(content);
                     }
                 }
             }
@@ -692,6 +736,56 @@ struct TranscribeRequest {
 #[derive(Deserialize)]
 struct ChatRequest {
     text: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+static CHAT_HISTORY: OnceLock<std::sync::Mutex<Vec<ChatMessage>>> = OnceLock::new();
+
+fn get_chat_history() -> &'static std::sync::Mutex<Vec<ChatMessage>> {
+    CHAT_HISTORY.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn get_history_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("wraith").join("history.json"))
+}
+
+fn load_history_from_disk() -> Vec<ChatMessage> {
+    if let Some(path) = get_history_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(data) = fs::read_to_string(&path) {
+            if let Ok(history) = serde_json::from_str::<Vec<ChatMessage>>(&data) {
+                println!("[Wraith] Loaded {} messages from history", history.len());
+                return history;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_history_to_disk(history: &[ChatMessage]) {
+    if let Some(path) = get_history_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(data) = serde_json::to_string(history) {
+            let _ = fs::write(&path, data);
+        }
+    }
+}
+
+async fn clear_history_handler() -> Html<String> {
+    if let Ok(mut history) = get_chat_history().lock() {
+        history.clear();
+        save_history_to_disk(&[]);
+    }
+    Html(String::from("History cleared"))
 }
 
 #[derive(Deserialize, Debug)]
