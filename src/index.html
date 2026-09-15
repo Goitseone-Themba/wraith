@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>Wraith</title>
     <style>
         :root {
@@ -407,6 +408,402 @@
             background: #cc3333;
         }
 
+        /* Engine switch */
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .engine-switch {
+            display: flex;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .engine-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 1px;
+            padding: 5px 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .engine-btn.active {
+            background: var(--text-main);
+            color: var(--bg-color);
+        }
+
+        /* opencode bar */
+        .opencode-bar {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 12px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            flex-shrink: 0;
+        }
+
+        .opencode-bar.active {
+            display: flex;
+        }
+
+        .opencode-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            color: var(--text-main);
+            min-width: 0;
+        }
+
+        .opencode-meta .session {
+            color: var(--text-dim);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 320px;
+        }
+
+        /* streaming parts */
+        .tool-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .tool-card {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--surface-elevated);
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            max-width: 100%;
+        }
+
+        .tool-card .tool-name {
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tool-card .tool-status {
+            margin-left: auto;
+            text-transform: uppercase;
+            font-size: 9px;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+        }
+
+        .tool-card.running .tool-status { color: #ffd166; }
+        .tool-card.completed .tool-status { color: #00ff88; }
+        .tool-card.error .tool-status { color: var(--danger); }
+
+        .reasoning {
+            margin-top: 4px;
+            font-size: 11px;
+            color: var(--text-dim);
+            max-width: 100%;
+        }
+
+        .reasoning summary {
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .reasoning-text {
+            white-space: pre-wrap;
+            margin-top: 4px;
+            max-height: 160px;
+            overflow: auto;
+        }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.65);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 18px;
+            width: 100%;
+            max-width: 460px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+        }
+
+        .modal h3 {
+            margin: 0;
+            font-size: 13px;
+            font-family: var(--font-mono);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .modal p {
+            margin: 0;
+            font-size: 13px;
+            color: var(--text-main);
+            white-space: pre-wrap;
+        }
+
+        .modal pre {
+            margin: 0;
+            padding: 8px;
+            background: var(--surface-color);
+            border-radius: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            overflow: auto;
+            max-height: 140px;
+            white-space: pre-wrap;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .modal-actions button {
+            padding: 8px 14px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-main);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .modal-actions button.primary {
+            background: var(--text-main);
+            color: var(--bg-color);
+            border-color: var(--text-main);
+        }
+
+        .modal-actions button.danger {
+            background: var(--danger-dim);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .question-options {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .question-option {
+            text-align: left;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-main);
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .question-option.selected {
+            border-color: var(--text-main);
+            background: var(--surface-color);
+        }
+
+        .question-option .label {
+            font-weight: 600;
+            display: block;
+        }
+
+        .question-option .desc {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .modal input[type=text] {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-main);
+            padding: 8px 10px;
+            font-size: 12px;
+            outline: none;
+        }
+
+        /* Install card */
+        .install-card {
+            padding: 14px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .install-card.active {
+            display: flex;
+        }
+
+        .install-title {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+
+        .install-desc {
+            margin: 0;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .install-command {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+
+        .install-command code {
+            flex: 1;
+            font-size: 11px;
+            color: #b8f5c8;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .install-command button,
+        .install-methods button {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            color: var(--text-muted);
+            font-size: 10px;
+            padding: 4px 10px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .install-command button:hover,
+        .install-methods button:hover {
+            color: var(--text-main);
+            border-color: var(--text-muted);
+        }
+
+        .install-methods {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .install-log {
+            margin: 0;
+            padding: 10px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            max-height: 180px;
+            overflow: auto;
+            font-size: 10px;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+        }
+
+        /* Session list */
+        .session-list {
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 200px;
+            overflow: auto;
+            padding: 8px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+
+        .session-list.active {
+            display: flex;
+        }
+
+        .session-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            border: 1px solid transparent;
+        }
+
+        .session-item:hover {
+            background: var(--surface-elevated);
+        }
+
+        .session-item.active {
+            border-color: var(--border-color);
+        }
+
+        .session-item .title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-main);
+        }
+
+        .session-item .meta {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+        }
+
+        .session-item .delete {
+            color: var(--danger);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar {
             width: 6px;
@@ -441,10 +838,48 @@
     <div class="container">
         <div class="header">
             <h1>WRAITH</h1>
-            <div class="status-badge">
-                <span class="status-dot" id="status-dot"></span>
-                <span id="status-text">Ready</span>
+            <div class="header-right">
+                <div class="engine-switch" id="engine-switch">
+                    <button class="engine-btn active" data-engine="local" title="Local LM Studio model">LOCAL</button>
+                    <button class="engine-btn" data-engine="opencode" title="opencode agent with tools">OPENCODE</button>
+                </div>
+                <div class="status-badge">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Ready</span>
+                </div>
             </div>
+        </div>
+
+        <div class="opencode-bar" id="opencode-bar">
+            <div class="opencode-meta">
+                <span id="opencode-status-text">opencode: checking…</span>
+                <span class="session" id="opencode-session-label">no session</span>
+            </div>
+            <div class="btn-group">
+                <button class="action-btn" id="btn-oc-sessions" title="List sessions">Sessions</button>
+                <button class="action-btn" id="btn-oc-new" title="Start a new session">New</button>
+                <button class="action-btn" id="btn-oc-abort" title="Abort the running turn" disabled>Stop</button>
+            </div>
+        </div>
+
+        <div class="session-list" id="session-list"></div>
+
+        <div class="install-card" id="install-card">
+            <div class="install-title">opencode is not installed</div>
+            <p class="install-desc">
+                Wraith runs opencode as a local agent for real tool use. Install it, then re-check.
+                Voice and text chat stay fully local otherwise.
+            </p>
+            <div class="install-command">
+                <code id="install-command">curl -fsSL https://opencode.ai/install | bash</code>
+                <button id="btn-copy-install">Copy</button>
+            </div>
+            <div class="install-methods" id="install-methods"></div>
+            <div class="btn-group">
+                <button class="action-btn" id="btn-install">Install now</button>
+                <button class="action-btn" id="btn-recheck">Re-check</button>
+            </div>
+            <pre class="install-log" id="install-log" hidden></pre>
         </div>
 
         <div class="chat-log" id="chat-log">
@@ -483,6 +918,32 @@
         <button class="end-call" id="btn-end-call">End Call</button>
     </div>
 
+    <div class="modal-overlay" id="permission-modal">
+        <div class="modal">
+            <h3>opencode requests permission</h3>
+            <p id="permission-title"></p>
+            <pre id="permission-detail" hidden></pre>
+            <div class="modal-actions">
+                <button class="danger" id="btn-permission-reject">Reject</button>
+                <button id="btn-permission-always">Always</button>
+                <button class="primary" id="btn-permission-once">Allow once</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="question-modal">
+        <div class="modal">
+            <h3 id="question-header">opencode has a question</h3>
+            <p id="question-text"></p>
+            <div class="question-options" id="question-options"></div>
+            <input type="text" id="question-custom" placeholder="Type a custom answer…" hidden>
+            <div class="modal-actions">
+                <button id="btn-question-skip">Skip</button>
+                <button class="primary" id="btn-question-submit">Answer</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const chatLog = document.getElementById('chat-log');
         const textInput = document.getElementById('text-input');
@@ -495,6 +956,35 @@
         const transcriptionPreview = document.getElementById('transcription-preview');
         const waveform = document.getElementById('waveform');
         const btnEndCall = document.getElementById('btn-end-call');
+
+        const engineSwitch = document.getElementById('engine-switch');
+        const opencodeBar = document.getElementById('opencode-bar');
+        const opencodeStatusText = document.getElementById('opencode-status-text');
+        const opencodeSessionLabel = document.getElementById('opencode-session-label');
+        const btnOcNew = document.getElementById('btn-oc-new');
+        const btnOcSessions = document.getElementById('btn-oc-sessions');
+        const btnOcAbort = document.getElementById('btn-oc-abort');
+        const sessionList = document.getElementById('session-list');
+        const installCard = document.getElementById('install-card');
+        const installCommand = document.getElementById('install-command');
+        const installMethods = document.getElementById('install-methods');
+        const installLog = document.getElementById('install-log');
+        const btnInstall = document.getElementById('btn-install');
+        const btnRecheck = document.getElementById('btn-recheck');
+        const btnCopyInstall = document.getElementById('btn-copy-install');
+        const permissionModal = document.getElementById('permission-modal');
+        const permissionTitle = document.getElementById('permission-title');
+        const permissionDetail = document.getElementById('permission-detail');
+        const btnPermissionOnce = document.getElementById('btn-permission-once');
+        const btnPermissionAlways = document.getElementById('btn-permission-always');
+        const btnPermissionReject = document.getElementById('btn-permission-reject');
+        const questionModal = document.getElementById('question-modal');
+        const questionHeader = document.getElementById('question-header');
+        const questionText = document.getElementById('question-text');
+        const questionOptions = document.getElementById('question-options');
+        const questionCustom = document.getElementById('question-custom');
+        const btnQuestionSubmit = document.getElementById('btn-question-submit');
+        const btnQuestionSkip = document.getElementById('btn-question-skip');
 
         const baseUrl = window.location.href;
 
@@ -510,6 +1000,17 @@
         let isRecordingCall = false;
         let isProcessingCallQuery = false;
         let currentAudio = null;
+
+        let engine = localStorage.getItem('wraith-engine') || 'local';
+        let ocSessionId = localStorage.getItem('wraith-opencode-session') || null;
+        let ocStatus = null;
+        let ocEventSource = null;
+        let ocInstallSource = null;
+        let ocMessages = new Map();
+        let ocPartText = new Map();
+        let ocActiveTurn = false;
+        let ocPendingPermission = null;
+        let ocPendingQuestion = null;
 
         let VOLUME_THRESHOLD_SPEAKING = 5.0;
         let VOLUME_THRESHOLD_INTERRUPT = 8.0;
@@ -787,10 +1288,50 @@
         }
 
         async function chat(text) {
+            if (engine === 'opencode') {
+                await ensureOpencodeReady();
+                const res = await fetch(`${baseUrl}opencode/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: ocSessionId, text })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'opencode request failed');
+                return data.text || '';
+            }
+
             const params = new URLSearchParams();
             params.append('text', text);
             const res = await fetch(`${baseUrl}chat`, { method: 'POST', body: params });
             return await res.text();
+        }
+
+        async function ensureOpencodeReady() {
+            if (!ocStatus) await loadOpencodeStatus();
+
+            if (!ocStatus || !ocStatus.installed) {
+                throw new Error('opencode is not installed');
+            }
+
+            if (!ocStatus.running) {
+                setStatus('Starting opencode...', true);
+                const res = await fetch(`${baseUrl}opencode/start`, { method: 'POST' });
+                if (!res.ok) throw new Error('could not start opencode');
+                await loadOpencodeStatus();
+            }
+
+            if (!ocSessionId) {
+                const res = await fetch(`${baseUrl}opencode/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'Wraith chat' })
+                });
+                const session = await res.json().catch(() => ({}));
+                if (!res.ok || !session.id) throw new Error('could not create opencode session');
+                ocSessionId = session.id;
+                localStorage.setItem('wraith-opencode-session', ocSessionId);
+                updateOpencodeSessionLabel(session.title);
+            }
         }
 
         async function synthesize(text) {
@@ -818,8 +1359,18 @@
             textInput.value = '';
             textInput.style.height = 'auto';
             appendMessage('user', text);
-
             setStatus('Thinking...', true);
+
+            if (engine === 'opencode') {
+                try {
+                    await sendOpencodeMessage(text);
+                } catch (err) {
+                    console.error(err);
+                    appendMessage('ai', 'opencode error: ' + err.message);
+                    setStatus('', false);
+                }
+                return;
+            }
 
             try {
                 const response = await chat(text);
@@ -907,11 +1458,19 @@
         });
 
         btnVoiceCall.addEventListener('click', () => {
+            if (engine === 'opencode') {
+                if (voiceStream.running) endStreamingVoiceCall();
+                else startStreamingVoiceCall();
+                return;
+            }
             if (!isVoiceCallActive) startVoiceCall();
             else endVoiceCall();
         });
 
-        btnEndCall.addEventListener('click', endVoiceCall);
+        btnEndCall.addEventListener('click', () => {
+            if (voiceStream.running) endStreamingVoiceCall();
+            else endVoiceCall();
+        });
 
         function startVoiceCall() {
             isVoiceCallActive = true;
@@ -1121,6 +1680,999 @@
             };
             stopMediaRecorder();
         }
+
+        /* ------------------------------------------------------------------
+         * opencode engine
+         * ------------------------------------------------------------------ */
+
+        function setEngine(next) {
+            engine = next;
+            localStorage.setItem('wraith-engine', next);
+
+            engineSwitch.querySelectorAll('.engine-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.engine === next);
+            });
+
+            const isOpencode = next === 'opencode';
+            opencodeBar.classList.toggle('active', isOpencode);
+            setStatus('', false);
+
+            if (isOpencode) {
+                loadOpencodeStatus();
+                connectOpencodeEvents();
+            } else {
+                disconnectOpencodeEvents();
+            }
+        }
+
+        async function loadOpencodeStatus() {
+            try {
+                const res = await fetch(`${baseUrl}opencode/status`);
+                ocStatus = await res.json();
+            } catch (e) {
+                ocStatus = { installed: false, running: false };
+            }
+
+            if (!ocStatus.installed) {
+                opencodeStatusText.textContent = 'opencode: not installed';
+                installCard.classList.add('active');
+                await loadInstallMethods();
+                updateOpencodeSessionLabel();
+                return;
+            }
+
+            installCard.classList.remove('active');
+            const running = ocStatus.running && ocStatus.healthy ? 'running' : 'stopped';
+            opencodeStatusText.textContent = `opencode ${ocStatus.version || ''} · ${running}`;
+            updateOpencodeSessionLabel();
+        }
+
+        function updateOpencodeSessionLabel(title) {
+            if (!ocSessionId) {
+                opencodeSessionLabel.textContent = 'no session — send a message to start one';
+                return;
+            }
+            opencodeSessionLabel.textContent = title || `session ${ocSessionId.slice(0, 14)}`;
+        }
+
+        async function loadInstallMethods() {
+            try {
+                const res = await fetch(`${baseUrl}api/tools/status`);
+                const data = await res.json();
+                const tool = (data.tools || []).find(t => t.id === 'opencode');
+                if (!tool) return;
+
+                const methods = tool.install_methods || [];
+                const primary = methods.find(m => m.id === 'official' && m.available)
+                    || methods.find(m => m.available)
+                    || methods[0];
+                if (primary) installCommand.textContent = primary.command;
+
+                installMethods.innerHTML = '';
+                methods.forEach(method => {
+                    if (!method.available) return;
+                    const btn = document.createElement('button');
+                    if (method.one_click) {
+                        btn.textContent = method.label;
+                        btn.title = method.command;
+                        btn.addEventListener('click', () => {
+                            installCommand.textContent = method.command;
+                            startInstall(method.id);
+                        });
+                    } else {
+                        btn.textContent = method.label + ' (copy)';
+                        btn.addEventListener('click', () => copyText(method.command));
+                    }
+                    installMethods.appendChild(btn);
+                });
+            } catch (e) {
+                console.warn('could not load install methods', e);
+            }
+        }
+
+        function copyText(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {});
+            }
+        }
+
+        async function startInstall(method) {
+            installLog.hidden = false;
+            installLog.textContent = '';
+            appendInstallLog('requesting install...');
+            try {
+                const res = await fetch(`${baseUrl}api/tools/install`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tool: 'opencode', method })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    appendInstallLog('error: ' + (data.error || res.statusText));
+                    return;
+                }
+                watchInstallLog();
+            } catch (e) {
+                appendInstallLog('error: ' + e.message);
+            }
+        }
+
+        function watchInstallLog() {
+            if (ocInstallSource) ocInstallSource.close();
+            ocInstallSource = new EventSource(`${baseUrl}api/tools/install/stream`);
+            ocInstallSource.onmessage = event => {
+                const line = event.data;
+                if (line.startsWith('__EXIT__')) {
+                    appendInstallLog('-- installer finished with code ' + line.replace('__EXIT__', '') + ' --');
+                    ocInstallSource.close();
+                    ocInstallSource = null;
+                    loadOpencodeStatus();
+                    return;
+                }
+                appendInstallLog(line);
+            };
+            ocInstallSource.onerror = () => {};
+        }
+
+        function appendInstallLog(line) {
+            installLog.textContent += line + '\n';
+            installLog.scrollTop = installLog.scrollHeight;
+        }
+
+        function connectOpencodeEvents() {
+            if (ocEventSource) return;
+            ocEventSource = new EventSource(`${baseUrl}opencode/events`);
+            ocEventSource.onmessage = event => {
+                try {
+                    handleOpencodeEvent(JSON.parse(event.data));
+                } catch (e) {
+                    console.warn('opencode event parse failed', e);
+                }
+            };
+            ocEventSource.onerror = () => {};
+        }
+
+        function disconnectOpencodeEvents() {
+            if (ocEventSource) {
+                ocEventSource.close();
+                ocEventSource = null;
+            }
+        }
+
+        function ensureOcMessage(messageID) {
+            if (ocMessages.has(messageID)) return ocMessages.get(messageID);
+
+            const el = document.createElement('div');
+            el.className = 'message ai';
+            el.dataset.messageId = messageID;
+            el.innerHTML = `
+                <span class="message-sender">Wraith</span>
+                <details class="reasoning" hidden><summary>Thinking</summary><div class="reasoning-text"></div></details>
+                <div class="tool-stack"></div>
+                <div class="message-bubble"></div>
+            `;
+            chatLog.appendChild(el);
+            scrollToBottom();
+
+            const entry = {
+                el,
+                bubble: el.querySelector('.message-bubble'),
+                reasoning: el.querySelector('.reasoning'),
+                reasoningText: el.querySelector('.reasoning-text'),
+                tools: el.querySelector('.tool-stack'),
+                parts: new Map()
+            };
+            ocMessages.set(messageID, entry);
+            return entry;
+        }
+
+        const TOOL_LABELS = {
+            bash: 'shell',
+            read: 'read',
+            write: 'write',
+            edit: 'edit',
+            patch: 'patch',
+            grep: 'grep',
+            glob: 'glob',
+            task: 'subagent',
+            webfetch: 'fetch',
+            websearch: 'search',
+            todowrite: 'todos',
+            question: 'question'
+        };
+
+        function renderOcPart(part) {
+            const entry = ensureOcMessage(part.messageID || 'unknown');
+
+            if (part.type === 'text') {
+                let node = entry.parts.get(part.id);
+                if (!node) {
+                    node = document.createElement('div');
+                    entry.bubble.appendChild(node);
+                    entry.parts.set(part.id, node);
+                }
+                const accumulated = ocPartText.get(part.id);
+                const incoming = part.text || '';
+                const text = accumulated !== undefined && incoming.length <= accumulated.length
+                    ? accumulated
+                    : incoming;
+                ocPartText.set(part.id, text);
+                node.textContent = text;
+            } else if (part.type === 'reasoning') {
+                entry.reasoning.hidden = false;
+                entry.reasoningText.textContent = part.text || '';
+            } else if (part.type === 'tool') {
+                renderToolPart(entry, part);
+            }
+
+            scrollToBottom();
+        }
+
+        function renderToolPart(entry, part) {
+            let card = entry.parts.get(part.id);
+            if (!card) {
+                card = document.createElement('div');
+                card.className = 'tool-card';
+                card.innerHTML = '<span class="tool-name"></span><span class="tool-status"></span>';
+                entry.tools.appendChild(card);
+                entry.parts.set(part.id, card);
+            }
+
+            const state = part.state || {};
+            const label = TOOL_LABELS[part.tool] || part.tool || 'tool';
+            const title = state.title
+                || (state.input && (state.input.command || state.input.filePath || state.input.path || state.input.pattern))
+                || '';
+
+            card.querySelector('.tool-name').textContent = label + (title ? ': ' + title : '');
+            card.querySelector('.tool-status').textContent =
+                state.status === 'running' ? 'running' :
+                state.status === 'completed' ? 'done' :
+                state.status === 'error' ? 'error' : 'pending';
+
+            card.classList.remove('running', 'completed', 'error');
+            if (state.status) card.classList.add(state.status);
+        }
+
+        async function sendOpencodeMessage(text) {
+            await ensureOpencodeReady();
+            ocActiveTurn = true;
+            btnOcAbort.disabled = false;
+            setStatus('opencode working...', true);
+
+            const res = await fetch(`${baseUrl}opencode/prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: ocSessionId, text })
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                ocActiveTurn = false;
+                btnOcAbort.disabled = true;
+                throw new Error(data.error || 'prompt failed');
+            }
+        }
+
+        function finalizeOpencodeTurn() {
+            ocActiveTurn = false;
+            btnOcAbort.disabled = true;
+            ocMessages.forEach(entry => { entry.reasoning.open = false; });
+            setStatus('', false);
+        }
+
+        async function abortOpencodeTurn() {
+            if (!ocSessionId) return;
+            try {
+                await fetch(`${baseUrl}opencode/abort`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: ocSessionId })
+                });
+            } catch (e) {
+                console.warn('abort failed', e);
+            }
+            finalizeOpencodeTurn();
+            appendMessage('ai', '[stopped]');
+        }
+
+        function handleOpencodeEvent(event) {
+            const type = event.type;
+            const props = event.properties || {};
+
+            switch (type) {
+                case 'message.part.updated':
+                    if (props.part && props.part.sessionID === ocSessionId) {
+                        renderOcPart(props.part);
+                    }
+                    break;
+                case 'message.part.delta': {
+                    if (props.sessionID !== ocSessionId) break;
+                    const deltaEntry = ensureOcMessage(props.messageID || 'unknown');
+                    const current = ocPartText.get(props.partID) || '';
+                    const next = current + (props.delta || '');
+                    ocPartText.set(props.partID, next);
+
+                    if (props.field === 'text') {
+                        let node = deltaEntry.parts.get(props.partID);
+                        if (!node) {
+                            node = document.createElement('div');
+                            deltaEntry.bubble.appendChild(node);
+                            deltaEntry.parts.set(props.partID, node);
+                        }
+                        node.textContent = next;
+                        scrollToBottom();
+                    } else if (props.field === 'reasoning') {
+                        deltaEntry.reasoning.hidden = false;
+                        deltaEntry.reasoningText.textContent = next;
+                    }
+                    break;
+                }
+                case 'message.updated': {
+                    const info = props.info || {};
+                    if (info.sessionID === ocSessionId && info.role === 'assistant' && info.error) {
+                        const message = info.error.data && info.error.data.message
+                            ? info.error.data.message
+                            : info.error.name;
+                        appendMessage('ai', 'opencode error: ' + message);
+                        finalizeOpencodeTurn();
+                    }
+                    break;
+                }
+                case 'permission.updated':
+                    if (props.sessionID === ocSessionId) showPermission(props);
+                    break;
+                case 'permission.replied':
+                    if (props.sessionID === ocSessionId) hidePermission();
+                    break;
+                case 'question.asked':
+                case 'question.v2.asked':
+                    showQuestion(props);
+                    break;
+                case 'question.replied':
+                case 'question.v2.replied':
+                case 'question.rejected':
+                case 'question.v2.rejected':
+                    hideQuestion();
+                    break;
+                case 'session.idle':
+                    if (props.sessionID === ocSessionId) finalizeOpencodeTurn();
+                    break;
+                case 'session.status':
+                    if (props.sessionID === ocSessionId && props.status) {
+                        if (props.status.type === 'busy') {
+                            ocActiveTurn = true;
+                            btnOcAbort.disabled = false;
+                            setStatus('opencode working...', true);
+                        } else if (props.status.type === 'idle') {
+                            finalizeOpencodeTurn();
+                        } else if (props.status.type === 'retry') {
+                            setStatus('opencode retrying...', true);
+                        }
+                    }
+                    break;
+                case 'session.error':
+                    if (props.sessionID === ocSessionId) {
+                        appendMessage('ai', 'opencode session error');
+                        finalizeOpencodeTurn();
+                    }
+                    break;
+                case 'session.updated':
+                    if (props.info && props.info.id === ocSessionId) {
+                        updateOpencodeSessionLabel(props.info.title);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function showPermission(permission) {
+            ocPendingPermission = permission;
+            permissionTitle.textContent = permission.title || permission.type || 'Permission required';
+
+            const metadata = permission.metadata || {};
+            const detail = metadata.command || metadata.filePath || metadata.path || metadata.pattern;
+            if (detail) {
+                permissionDetail.hidden = false;
+                permissionDetail.textContent = typeof detail === 'string'
+                    ? detail
+                    : JSON.stringify(detail, null, 2);
+            } else {
+                permissionDetail.hidden = true;
+            }
+
+            permissionModal.classList.add('active');
+        }
+
+        function hidePermission() {
+            ocPendingPermission = null;
+            permissionModal.classList.remove('active');
+        }
+
+        async function replyPermission(response, remember) {
+            const permission = ocPendingPermission;
+            if (!permission) return;
+            hidePermission();
+            try {
+                await fetch(`${baseUrl}opencode/permission`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: permission.sessionID,
+                        permission_id: permission.id,
+                        response,
+                        remember: !!remember
+                    })
+                });
+            } catch (e) {
+                console.warn('permission reply failed', e);
+            }
+        }
+
+        function showQuestion(request) {
+            ocPendingQuestion = request;
+            const questions = request.questions || [];
+            const first = questions[0] || {};
+
+            questionHeader.textContent = first.header || 'opencode has a question';
+            questionText.textContent = first.question || '';
+            questionCustom.value = '';
+            questionCustom.hidden = first.custom === false;
+            questionOptions.innerHTML = '';
+
+            const multiple = !!first.multiple;
+            (first.options || []).forEach(option => {
+                const btn = document.createElement('button');
+                btn.className = 'question-option';
+                btn.dataset.label = option.label;
+                btn.innerHTML = `<span class="label">${escapeHtml(option.label)}</span>`
+                    + `<span class="desc">${escapeHtml(option.description || '')}</span>`;
+                btn.addEventListener('click', () => {
+                    if (multiple) {
+                        btn.classList.toggle('selected');
+                    } else {
+                        questionOptions.querySelectorAll('.question-option')
+                            .forEach(other => other.classList.remove('selected'));
+                        btn.classList.add('selected');
+                    }
+                });
+                questionOptions.appendChild(btn);
+            });
+
+            questionModal.classList.add('active');
+        }
+
+        function hideQuestion() {
+            ocPendingQuestion = null;
+            questionModal.classList.remove('active');
+        }
+
+        async function answerQuestion() {
+            const request = ocPendingQuestion;
+            if (!request) return;
+
+            const selected = Array.from(questionOptions.querySelectorAll('.question-option.selected'))
+                .map(el => el.dataset.label);
+            const custom = questionCustom.value.trim();
+            const answer = selected.length ? selected : (custom ? [custom] : []);
+
+            hideQuestion();
+            try {
+                await fetch(`${baseUrl}opencode/question`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request_id: request.id, answers: [answer] })
+                });
+            } catch (e) {
+                console.warn('question reply failed', e);
+            }
+        }
+
+        async function skipQuestion() {
+            const request = ocPendingQuestion;
+            hideQuestion();
+            if (!request) return;
+            try {
+                await fetch(`${baseUrl}opencode/question/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request_id: request.id })
+                });
+            } catch (e) {
+                console.warn('question reject failed', e);
+            }
+        }
+
+        async function refreshSessions() {
+            try {
+                const res = await fetch(`${baseUrl}opencode/sessions`);
+                const sessions = await res.json();
+                renderSessionList(Array.isArray(sessions) ? sessions : []);
+            } catch (e) {
+                console.warn('could not load sessions', e);
+            }
+        }
+
+        function renderSessionList(sessions) {
+            sessionList.innerHTML = '';
+
+            if (!sessions.length) {
+                const empty = document.createElement('div');
+                empty.className = 'session-item';
+                empty.textContent = 'No sessions yet';
+                sessionList.appendChild(empty);
+                sessionList.classList.add('active');
+                return;
+            }
+
+            sessions.slice(0, 30).forEach(session => {
+                const item = document.createElement('div');
+                item.className = 'session-item' + (session.id === ocSessionId ? ' active' : '');
+                const updated = (session.time && session.time.updated) || Date.now();
+                item.innerHTML = `
+                    <span class="title">${escapeHtml(session.title || session.slug || session.id)}</span>
+                    <span class="meta">${new Date(updated).toLocaleDateString()}</span>
+                    <button class="delete" title="Delete session">✕</button>
+                `;
+                item.addEventListener('click', () => switchOpencodeSession(session));
+                item.querySelector('.delete').addEventListener('click', event => {
+                    event.stopPropagation();
+                    deleteOpencodeSession(session);
+                });
+                sessionList.appendChild(item);
+            });
+            sessionList.classList.add('active');
+        }
+
+        async function switchOpencodeSession(session) {
+            ocSessionId = session.id;
+            localStorage.setItem('wraith-opencode-session', ocSessionId);
+            updateOpencodeSessionLabel(session.title);
+            chatLog.innerHTML = '';
+            ocMessages.clear();
+            ocPartText.clear();
+            sessionList.classList.remove('active');
+            await loadOpencodeHistory(session.id);
+        }
+
+        async function loadOpencodeHistory(sessionId) {
+            try {
+                const res = await fetch(`${baseUrl}opencode/sessions/${encodeURIComponent(sessionId)}/messages`);
+                if (!res.ok) return;
+                const messages = await res.json();
+
+                (messages || []).forEach(message => {
+                    (message.parts || []).forEach(part => {
+                        if (part.type === 'text') {
+                            if ((message.info || {}).role === 'assistant') renderOcPart(part);
+                            else appendMessage('user', part.text || '');
+                        } else if (part.type === 'tool' || part.type === 'reasoning') {
+                            renderOcPart(part);
+                        }
+                    });
+                });
+
+                ocMessages.forEach(entry => { entry.reasoning.open = false; });
+                scrollToBottom();
+            } catch (e) {
+                console.warn('could not load session history', e);
+            }
+        }
+
+        async function deleteOpencodeSession(session) {
+            if (!confirm('Delete session "' + (session.title || session.id) + '"?')) return;
+            try {
+                await fetch(`${baseUrl}opencode/sessions/${encodeURIComponent(session.id)}`, {
+                    method: 'DELETE'
+                });
+                if (session.id === ocSessionId) {
+                    ocSessionId = null;
+                    localStorage.removeItem('wraith-opencode-session');
+                    updateOpencodeSessionLabel();
+                }
+                refreshSessions();
+            } catch (e) {
+                console.warn('delete failed', e);
+            }
+        }
+
+        async function newOpencodeSession() {
+            chatLog.innerHTML = '';
+            ocMessages.clear();
+            ocPartText.clear();
+            ocSessionId = null;
+            localStorage.removeItem('wraith-opencode-session');
+            updateOpencodeSessionLabel();
+            sessionList.classList.remove('active');
+            try {
+                await ensureOpencodeReady();
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+
+        /* ------------------------------------------------------------------
+         * streaming voice call (opencode engine): PCM over WebSocket
+         * ------------------------------------------------------------------ */
+
+        const voiceStream = {
+            running: false,
+            ws: null,
+            ctx: null,
+            stream: null,
+            captureNode: null,
+            playbackNode: null,
+            state: 'listening',
+            silenceMs: 650,
+            minSpeechMs: 350,
+            interruptThreshold: 8.0,
+            speakingThreshold: 5.0,
+            lastSpeakAt: 0,
+            totalSpeechMs: 0,
+            endpointSent: false,
+            preview: '',
+        };
+
+        const WORKLET_SOURCE = `
+            class WraithCapture extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.ratio = sampleRate / 16000;
+                    this.acc = 0;
+                    this.out = [];
+                }
+                process(inputs) {
+                    const input = inputs[0];
+                    if (!input || !input[0]) return true;
+                    const channel = input[0];
+                    for (let i = 0; i < channel.length; i++) {
+                        this.acc += 1;
+                        while (this.acc >= this.ratio) {
+                            this.acc -= this.ratio;
+                            const sample = Math.max(-1, Math.min(1, channel[i]));
+                            this.out.push(sample < 0 ? sample * 0x8000 : sample * 0x7fff);
+                        }
+                    }
+                    if (this.out.length >= 640) {
+                        const chunk = new Int16Array(this.out);
+                        this.port.postMessage(chunk, [chunk.buffer]);
+                        this.out = [];
+                    }
+                    return true;
+                }
+            }
+
+            class WraithPlayback extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.queue = [];
+                    this.current = null;
+                    this.offset = 0;
+                    this.ratio = 1;
+                    this.port.onmessage = event => {
+                        const message = event.data;
+                        if (message.type === 'pcm') {
+                            this.queue.push(message.data);
+                        } else if (message.type === 'flush') {
+                            this.queue = [];
+                            this.current = null;
+                            this.offset = 0;
+                        } else if (message.type === 'rate') {
+                            this.ratio = message.value / sampleRate;
+                        }
+                    };
+                }
+                process(inputs, outputs) {
+                    const out = outputs[0][0];
+                    for (let i = 0; i < out.length; i++) {
+                        if (!this.current || this.offset >= this.current.length) {
+                            this.current = this.queue.shift() || null;
+                            this.offset = 0;
+                        }
+                        if (!this.current) {
+                            out[i] = 0;
+                            continue;
+                        }
+                        const position = Math.floor(this.offset);
+                        const fraction = this.offset - position;
+                        const a = this.current[position];
+                        const b = this.current[Math.min(position + 1, this.current.length - 1)];
+                        out[i] = a + (b - a) * fraction;
+                        this.offset += this.ratio;
+                    }
+                    return true;
+                }
+            }
+
+            registerProcessor('wraith-capture', WraithCapture);
+            registerProcessor('wraith-playback', WraithPlayback);
+        `;
+
+        function voiceSettingText() {
+            if (voiceStream.preview) {
+                transcriptionPreview.textContent = voiceStream.preview;
+                return;
+            }
+            const suffix = voiceStream.state === 'speaking' ? 'Speaking...' :
+                voiceStream.state === 'working' ? 'Working...' :
+                voiceStream.state === 'thinking' ? 'Thinking...' :
+                voiceStream.state === 'transcribing' ? 'Transcribing...' :
+                voiceStream.state === 'awaiting_permission' ? 'Waiting for your answer (yes/no/always)...' :
+                voiceStream.state === 'awaiting_answer' ? 'Waiting for your answer...' :
+                'Listening...';
+            transcriptionPreview.textContent = suffix;
+        }
+
+        async function startStreamingVoiceCall() {
+            if (voiceStream.running) return;
+
+            try {
+                const configRes = await fetch(`${baseUrl}voice/config`);
+                const config = await configRes.json();
+                voiceStream.silenceMs = config.silence_ms ?? 650;
+                voiceStream.minSpeechMs = config.min_speech_ms ?? 350;
+                voiceStream.speakingThreshold = VOLUME_THRESHOLD_SPEAKING;
+                voiceStream.interruptThreshold = VOLUME_THRESHOLD_INTERRUPT;
+                voiceStream.state = 'listening';
+                voiceStream.preview = '';
+                voiceStream.lastSpeakAt = performance.now();
+                voiceStream.totalSpeechMs = 0;
+                voiceStream.endpointSent = false;
+            } catch (e) {
+                console.warn('voice config unavailable, using defaults', e);
+            }
+
+            try {
+                if (!globalMediaStream) {
+                    globalMediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                    });
+                }
+                voiceStream.stream = globalMediaStream;
+
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                voiceStream.ctx = ctx;
+
+                const blob = new Blob([WORKLET_SOURCE], { type: 'application/javascript' });
+                const workletUrl = URL.createObjectURL(blob);
+                await ctx.audioWorklet.addModule(workletUrl);
+                URL.revokeObjectURL(workletUrl);
+
+                const source = ctx.createMediaStreamSource(globalMediaStream);
+                const capture = new AudioWorkletNode(ctx, 'wraith-capture');
+                const playback = new AudioWorkletNode(ctx, 'wraith-playback');
+                source.connect(capture);
+
+                const mute = ctx.createGain();
+                mute.gain.value = 0;
+                playback.connect(mute);
+                mute.connect(ctx.destination);
+
+                voiceStream.captureNode = capture;
+                voiceStream.playbackNode = playback;
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const ws = new WebSocket(`${protocol}//${window.location.host}/ws/voice`);
+                voiceStream.ws = ws;
+
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        type: 'start',
+                        engine: 'opencode',
+                        session_id: ocSessionId || undefined,
+                    }));
+                };
+
+                ws.onmessage = event => handleVoiceServerMessage(event);
+
+                ws.onclose = () => {
+                    if (voiceStream.running) {
+                        setStatus('Voice connection closed', false);
+                        endStreamingVoiceCall();
+                    }
+                };
+
+                capture.port.onmessage = event => handleVoiceMicChunk(event.data);
+
+                voiceStream.running = true;
+                isVoiceCallActive = true;
+                btnVoiceCall.classList.add('active');
+                voiceCallUI.classList.add('active');
+                setStatus('Voice call active', true);
+                voiceSettingText();
+            } catch (err) {
+                console.error('streaming voice start failed', err);
+                handleMicError(err);
+                endStreamingVoiceCall();
+            }
+        }
+
+        function handleVoiceMicChunk(samples) {
+            const ws = voiceStream.ws;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+            ws.send(samples.buffer);
+
+            let sum = 0;
+            for (let i = 0; i < samples.length; i++) {
+                const value = samples[i] / 32768;
+                sum += value * value;
+            }
+            const rms = Math.sqrt(sum / samples.length) * 100;
+            const now = performance.now();
+
+            const bars = waveform.querySelectorAll('.waveform-bar');
+            bars.forEach((bar, i) => {
+                const shape = 0.4 + 0.6 * Math.abs(Math.sin((i + 1) * 0.6));
+                bar.style.height = `${Math.max(4, Math.min(40, rms * shape * 2))}px`;
+            });
+
+            if (voiceStream.state === 'listening') {
+                if (rms > voiceStream.speakingThreshold) {
+                    voiceStream.lastSpeakAt = now;
+                    voiceStream.totalSpeechMs += 20;
+                    voiceStream.endpointSent = false;
+                } else if (!voiceStream.endpointSent &&
+                    now - voiceStream.lastSpeakAt > voiceStream.silenceMs &&
+                    voiceStream.totalSpeechMs >= voiceStream.minSpeechMs) {
+                    voiceStream.endpointSent = true;
+                    ws.send(JSON.stringify({ type: 'endpoint' }));
+                }
+            } else if (voiceStream.state === 'speaking' || voiceStream.state === 'working') {
+                if (rms > voiceStream.interruptThreshold) {
+                    voiceStream.playbackNode.port.postMessage({ type: 'flush' });
+                    ws.send(JSON.stringify({ type: 'barge_in', abort: false }));
+                    voiceStream.state = 'listening';
+                    voiceStream.lastSpeakAt = now;
+                    voiceStream.totalSpeechMs = 0;
+                    voiceStream.endpointSent = false;
+                    voiceStream.preview = '';
+                    voiceSettingText();
+                }
+            }
+        }
+
+        function handleVoiceServerMessage(event) {
+            if (typeof event.data !== 'string') {
+                if (!voiceStream.playbackNode) return;
+                const samples = new Int16Array(event.data);
+                const floats = new Float32Array(samples.length);
+                for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+                voiceStream.playbackNode.port.postMessage({ type: 'pcm', data: floats }, [floats.buffer]);
+                return;
+            }
+
+            let message;
+            try {
+                message = JSON.parse(event.data);
+            } catch (e) {
+                return;
+            }
+
+            switch (message.type) {
+                case 'state':
+                    voiceStream.state = message.value;
+                    if (message.value === 'listening') {
+                        voiceStream.totalSpeechMs = 0;
+                        voiceStream.endpointSent = false;
+                        voiceStream.preview = '';
+                    }
+                    voiceSettingText();
+                    break;
+                case 'final':
+                    if (message.text) {
+                        voiceStream.preview = 'You said: ' + message.text;
+                        appendMessage('user', message.text);
+                    }
+                    voiceSettingText();
+                    break;
+                case 'sentence':
+                    voiceStream.preview = message.text;
+                    voiceSettingText();
+                    break;
+                case 'tool':
+                    voiceStream.preview = `Tool: ${message.tool} (${message.status})`;
+                    voiceSettingText();
+                    break;
+                case 'permission':
+                    showPermission(message.permission);
+                    break;
+                case 'question':
+                    showQuestion(message.question);
+                    break;
+                case 'speed':
+                    break;
+                case 'error':
+                    voiceStream.preview = 'Error: ' + (message.error || 'unknown');
+                    voiceSettingText();
+                    break;
+                case 'audio_end':
+                    voiceStream.state = 'listening';
+                    voiceStream.totalSpeechMs = 0;
+                    voiceStream.endpointSent = false;
+                    voiceSettingText();
+                    break;
+                case 'config':
+                    if (voiceStream.playbackNode && message.sample_rate) {
+                        voiceStream.playbackNode.port.postMessage({ type: 'rate', value: message.sample_rate });
+                    }
+                    break;
+                case 'session':
+                    if (message.session_id) {
+                        ocSessionId = message.session_id;
+                        localStorage.setItem('wraith-opencode-session', ocSessionId);
+                        updateOpencodeSessionLabel();
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function endStreamingVoiceCall() {
+            voiceStream.running = false;
+            isVoiceCallActive = false;
+            btnVoiceCall.classList.remove('active');
+            voiceCallUI.classList.remove('active');
+
+            if (voiceStream.ws && voiceStream.ws.readyState === WebSocket.OPEN) {
+                voiceStream.ws.send(JSON.stringify({ type: 'stop' }));
+                voiceStream.ws.close();
+            }
+            voiceStream.ws = null;
+
+            if (voiceStream.captureNode) {
+                voiceStream.captureNode.port.onmessage = null;
+                voiceStream.captureNode.disconnect();
+                voiceStream.captureNode = null;
+            }
+            if (voiceStream.playbackNode) {
+                voiceStream.playbackNode.disconnect();
+                voiceStream.playbackNode = null;
+            }
+            if (voiceStream.ctx) {
+                const ctx = voiceStream.ctx;
+                voiceStream.ctx = null;
+                ctx.close().catch(() => {});
+            }
+
+            transcriptionPreview.textContent = 'Listening...';
+            setStatus('', false);
+        }
+
+        engineSwitch.addEventListener('click', event => {
+            const btn = event.target.closest('.engine-btn');
+            if (btn) setEngine(btn.dataset.engine);
+        });
+
+        btnOcAbort.addEventListener('click', abortOpencodeTurn);
+
+        btnOcNew.addEventListener('click', newOpencodeSession);
+
+        btnOcSessions.addEventListener('click', () => {
+            if (sessionList.classList.contains('active')) {
+                sessionList.classList.remove('active');
+            } else {
+                refreshSessions();
+            }
+        });
+
+        btnRecheck.addEventListener('click', loadOpencodeStatus);
+        btnCopyInstall.addEventListener('click', () => copyText(installCommand.textContent));
+        btnInstall.addEventListener('click', () => {
+            const method = installMethods.querySelector('button');
+            if (method) method.click();
+        });
+
+        btnPermissionOnce.addEventListener('click', () => replyPermission('once', false));
+        btnPermissionAlways.addEventListener('click', () => replyPermission('always', true));
+        btnPermissionReject.addEventListener('click', () => replyPermission('reject', false));
+        btnQuestionSubmit.addEventListener('click', answerQuestion);
+        btnQuestionSkip.addEventListener('click', skipQuestion);
+
+        setEngine(engine);
     </script>
 </body>
 

@@ -9,7 +9,13 @@
 #   WRAITH_HOST, WRAITH_PORT, WRAITH_LLM_MODEL, WRAITH_LLM_ENDPOINT,
 #   WRAITH_TTS_MODEL, WRAITH_STT_EXECUTABLE, WRAITH_VAD_SILENCE_MS,
 #   WRAITH_VAD_VOLUME_SPEAKING, WRAITH_VAD_VOLUME_INTERRUPT,
-#   WRAITH_VAD_MIN_RECORDING_MS, WRAITH_CERT_PATH, WRAITH_KEY_PATH
+#   WRAITH_VAD_MIN_RECORDING_MS, WRAITH_CERT_PATH, WRAITH_KEY_PATH,
+#   WRAITH_OPENCODE_EXECUTABLE, WRAITH_OPENCODE_DIRECTORY,
+#   WRAITH_OPENCODE_AGENT, WRAITH_OPENCODE_MODEL, WRAITH_OPENCODE_PORT,
+#   WRAITH_OPENCODE_AUTO_START, WRAITH_OPENCODE_EXTRA_ARGS,
+#   WRAITH_VOICE_SILENCE_MS, WRAITH_VOICE_MIN_SPEECH_MS, WRAITH_VOICE_SPEED,
+#   WRAITH_VOICE_NARRATION, WRAITH_VOICE_INTERRUPT_ABORTS, WRAITH_VOICE_PREWARM,
+#   WRAITH_VOICE_DEBUG
 
 [server]
 host = "0.0.0.0"
@@ -34,3 +40,25 @@ min_recording_duration_ms = 500
 [security]
 cert_path = "cert.pem"
 key_path = "key.pem"
+
+# opencode engine (optional)
+# Wraith manages a local `opencode serve` process bound to 127.0.0.1 with a
+# random password. When `directory` is empty, Wraith's working directory is used.
+[opencode]
+executable = "opencode"
+directory = ""
+agent = ""            # optional, e.g. "build"
+model = ""            # optional, e.g. "opencode/gpt-5.1-codex"
+port = 0              # 0 = pick a random local port
+auto_start = false
+extra_args = []
+
+# Streaming voice call (opencode engine)
+[voice]
+silence_ms = 650            # end-of-speech timeout during a voice call
+min_speech_ms = 350         # minimum speech before ending a turn
+speed = 1.0                 # TTS rate; piper length_scale = 1 / speed
+narration = "tools"         # off | tools | thoughts
+interrupt_aborts = false    # barge-in also aborts the opencode turn
+prewarm = true              # warm piper at call start
+debug = false               # log per-turn latency and expose /voice/metrics

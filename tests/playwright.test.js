@@ -1385,6 +1385,440 @@ async function testAudioSourceReuse() {
 }
 
 /**
+ * TEST SUITE 20: opencode engine integration (mocked opencode server)
+ */
+async function testOpencodeUI() {
+    console.log('\n═══════════════════════════════════════════');
+    console.log('TEST SUITE 20: opencode engine integration');
+    console.log('═══════════════════════════════════════════\n');
+
+    let permissionPayload = null;
+    let questionPayload = null;
+    let installPayload = null;
+    let deleteCalled = false;
+
+    await page.evaluate(() => {
+        localStorage.removeItem('wraith-engine');
+        localStorage.removeItem('wraith-opencode-session');
+    });
+
+    await page.route('**/opencode/status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            enabled: true,
+            installed: true,
+            executable: 'opencode',
+            version: '1.18.25-test',
+            running: true,
+            healthy: true,
+            base_url: 'http://127.0.0.1:4096',
+            directory: '/tmp',
+            question_api: true,
+            error: null
+        })
+    }));
+
+    await page.route('**/opencode/sessions', route => {
+        if (route.request().method() === 'POST') {
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ id: 'ses_test', title: 'Wraith chat' })
+            });
+        }
+        return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([
+                { id: 'ses_test', title: 'Session one', time: { updated: Date.now() } },
+                { id: 'ses_two', title: 'Session two', time: { updated: Date.now() } }
+            ])
+        });
+    });
+
+    await page.route('**/opencode/sessions/*/messages', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+            {
+                info: { role: 'assistant' },
+                parts: [{ id: 'part_1', messageID: 'msg_1', sessionID: 'ses_test', type: 'text', text: 'history reply' }]
+            }
+        ])
+    }));
+
+    await page.route('**/opencode/sessions/*', route => {
+        if (route.request().method() === 'DELETE') {
+            deleteCalled = true;
+            return route.fulfill({ status: 200, contentType: 'application/json', body: 'true' });
+        }
+        return route.continue();
+    });
+
+    await page.route('**/opencode/permission', route => {
+        permissionPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({ status: 200, contentType: 'application/json', body: 'true' });
+    });
+
+    await page.route('**/opencode/question', route => {
+        questionPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({ status: 200, contentType: 'application/json', body: 'true' });
+    });
+
+    await page.route('**/opencode/question/reject', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: 'true'
+    }));
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+
+    await assertElementExists('#engine-switch', 'Engine switch exists');
+    await assertTrue(
+        await page.$eval('[data-engine="local"]', el => el.classList.contains('active')),
+        'Local engine is the default'
+    );
+
+    await page.click('[data-engine="opencode"]');
+    await page.waitForTimeout(600);
+
+    const opencodeStatus = await page.$eval('#opencode-status-text', el => el.textContent);
+    await assertContains(opencodeStatus, '1.18.25-test', 'opencode status shows version');
+    await assertTrue(
+        await page.$eval('#opencode-bar', el => el.classList.contains('active')),
+        'opencode bar is visible when engine is active'
+    );
+
+    // Streaming part rendering
+    await page.evaluate(() => {
+        renderOcPart({ id: 'text_1', messageID: 'msg_stream', sessionID: 'ses_test', type: 'text', text: 'streaming hello' });
+        renderOcPart({ id: 'tool_1', messageID: 'msg_stream', sessionID: 'ses_test', type: 'tool', tool: 'bash', state: { status: 'running', input: { command: 'cargo test' }, title: 'cargo test' } });
+        renderOcPart({ id: 'reason_1', messageID: 'msg_stream', sessionID: 'ses_test', type: 'reasoning', text: 'thinking hard' });
+    });
+
+    await assertContains(await page.$eval('.message[data-message-id="msg_stream"] .message-bubble', el => el.textContent), 'streaming hello', 'Streaming text part renders');
+    await assertTrue(
+        await page.$eval('.message[data-message-id="msg_stream"] .tool-card', el => el.classList.contains('running')),
+        'Running tool card renders with running state'
+    );
+    await assertContains(await page.$eval('.message[data-message-id="msg_stream"] .tool-name', el => el.textContent), 'cargo test', 'Tool card shows command title');
+    await assertTrue(
+        await page.$eval('.message[data-message-id="msg_stream"] .reasoning', el => !el.hidden),
+        'Reasoning part reveals thinking block'
+    );
+
+    await page.evaluate(() => {
+        renderOcPart({ id: 'tool_1', messageID: 'msg_stream', sessionID: 'ses_test', type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'cargo test' }, title: 'cargo test' } });
+    });
+    await assertTrue(
+        await page.$eval('.message[data-message-id="msg_stream"] .tool-card', el => el.classList.contains('completed')),
+        'Tool card updates to completed'
+    );
+
+    // Permission modal
+    await page.evaluate(() => {
+        showPermission({
+            id: 'per_1',
+            sessionID: 'ses_test',
+            type: 'bash',
+            title: 'Run shell command',
+            metadata: { command: 'rm -rf build' }
+        });
+    });
+    await assertTrue(
+        await page.$eval('#permission-modal', el => el.classList.contains('active')),
+        'Permission modal opens on permission.updated'
+    );
+    await assertContains(await page.$eval('#permission-detail', el => el.textContent), 'rm -rf build', 'Permission modal shows command');
+    await page.click('#btn-permission-once');
+    await page.waitForTimeout(200);
+    await assertTrue(
+        permissionPayload && permissionPayload.response === 'once' && permissionPayload.permission_id === 'per_1',
+        'Permission reply posts the selected response',
+        JSON.stringify(permissionPayload)
+    );
+
+    // Question modal
+    await page.evaluate(() => {
+        showQuestion({
+            id: 'que_1',
+            sessionID: 'ses_test',
+            questions: [{
+                header: 'Pick one',
+                question: 'Which approach?',
+                options: [
+                    { label: 'Fast', description: 'Ship quickly' },
+                    { label: 'Safe', description: 'More tests' }
+                ]
+            }]
+        });
+    });
+    await assertTrue(
+        await page.$eval('#question-modal', el => el.classList.contains('active')),
+        'Question modal opens on question.asked'
+    );
+    await assertEquals(await page.$$eval('.question-option', els => els.length), 2, 'Question options render');
+    await page.click('.question-option[data-label="Safe"]');
+    await page.click('#btn-question-submit');
+    await page.waitForTimeout(200);
+    await assertTrue(
+        questionPayload && questionPayload.answers && questionPayload.answers[0][0] === 'Safe',
+        'Question reply posts selected label',
+        JSON.stringify(questionPayload)
+    );
+
+    // Session list + history
+    await page.click('#btn-oc-sessions');
+    await page.waitForTimeout(300);
+    await assertEquals(await page.$$eval('.session-item', els => els.length), 2, 'Session list renders sessions');
+    await page.click('.session-item');
+    await page.waitForTimeout(400);
+    await assertContains(await page.$eval('#chat-log', el => el.textContent), 'history reply', 'Session history loads on switch');
+    await assertContains(await page.$eval('#opencode-session-label', el => el.textContent), 'Session one', 'Session label updates on switch');
+
+    // Deleting a session
+    await page.click('#btn-oc-sessions');
+    await page.waitForTimeout(300);
+    const dialogHandler = dialog => dialog.accept();
+    page.on('dialog', dialogHandler);
+    await page.click('.session-item .delete');
+    await page.waitForTimeout(300);
+    page.off('dialog', dialogHandler);
+    await assertTrue(deleteCalled, 'Delete session calls the DELETE endpoint');
+
+    // Uninstalled state and install methods
+    await page.unroute('**/opencode/status');
+    await page.route('**/opencode/status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            enabled: true,
+            installed: false,
+            executable: 'opencode',
+            version: null,
+            running: false,
+            healthy: false,
+            base_url: null,
+            directory: '/tmp',
+            question_api: false,
+            error: null
+        })
+    }));
+
+    await page.click('[data-engine="local"]');
+    await page.click('[data-engine="opencode"]');
+    await page.waitForTimeout(3000);
+
+    await assertTrue(
+        await page.$eval('#install-card', el => el.classList.contains('active')),
+        'Install card appears when opencode is missing'
+    );
+    const methodCount = await page.$$eval('#install-methods button', els => els.length);
+    await assertTrue(methodCount > 0, 'Install methods render', `count=${methodCount}`);
+    await assertContains(
+        await page.$eval('#install-command', el => el.textContent),
+        'opencode',
+        'Install command is shown'
+    );
+
+    await page.route('**/api/tools/install', route => {
+        installPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.click('#install-methods button');
+    await page.waitForTimeout(300);
+    await assertTrue(
+        installPayload && installPayload.tool === 'opencode' && typeof installPayload.method === 'string',
+        'Install button posts tool and method',
+        JSON.stringify(installPayload)
+    );
+
+    await page.evaluate(() => {
+        localStorage.removeItem('wraith-engine');
+        localStorage.removeItem('wraith-opencode-session');
+    });
+    await page.unroute('**/opencode/status');
+    await page.unroute('**/opencode/sessions');
+    await page.unroute('**/opencode/sessions/*');
+    await page.unroute('**/opencode/sessions/*/messages');
+    await page.unroute('**/opencode/permission');
+    await page.unroute('**/opencode/question');
+    await page.unroute('**/opencode/question/reject');
+    await page.unroute('**/api/tools/install');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+}
+
+/**
+ * TEST SUITE 21: streaming voice client (fake WebSocket, real AudioWorklets)
+ */
+async function testStreamingVoiceUI() {
+    console.log('\n═══════════════════════════════════════════');
+    console.log('TEST SUITE 21: streaming voice client');
+    console.log('═══════════════════════════════════════════\n');
+
+    const previousPage = page;
+    page = await previousPage.context().newPage();
+
+    await page.addInitScript(() => {
+        window.__fakeSockets = [];
+        class FakeWebSocket {
+            constructor(url) {
+                this.url = url;
+                this.readyState = 0;
+                this.sent = [];
+                this.onopen = null;
+                this.onmessage = null;
+                this.onclose = null;
+                this.onerror = null;
+                window.__fakeSockets.push(this);
+            }
+            send(data) {
+                this.sent.push(data);
+            }
+            close() {
+                this.readyState = 3;
+                if (this.onclose) this.onclose({});
+            }
+            open() {
+                this.readyState = 1;
+                if (this.onopen) this.onopen({});
+            }
+            emit(message) {
+                if (this.onmessage) this.onmessage({ data: JSON.stringify(message) });
+            }
+        }
+        FakeWebSocket.OPEN = 1;
+        FakeWebSocket.CLOSED = 3;
+        window.WebSocket = FakeWebSocket;
+
+        // Keep the real playback worklet, but make capture deterministic:
+        // the fake fake-mic tone must not race the VAD assertions.
+        const RealAudioWorkletNode = window.AudioWorkletNode;
+        window.AudioWorkletNode = class {
+            constructor(context, name, options) {
+                if (name === 'wraith-capture') {
+                    this.port = { onmessage: null, postMessage: () => {} };
+                } else {
+                    this._node = new RealAudioWorkletNode(context, name, options);
+                    this.port = this._node.port;
+                }
+            }
+            connect(destination) {
+                if (this._node) return this._node.connect(destination);
+            }
+            disconnect() {
+                if (this._node) return this._node.disconnect();
+            }
+        };
+
+        const realCreateMediaStreamSource = AudioContext.prototype.createMediaStreamSource;
+        AudioContext.prototype.createMediaStreamSource = function (stream) {
+            const node = realCreateMediaStreamSource.call(this, stream);
+            node.connect = () => {};
+            return node;
+        };
+    });
+
+    await page.route('**/opencode/status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            enabled: true, installed: true, executable: 'opencode',
+            version: '1.18.25-test', running: true, healthy: true,
+            base_url: 'http://127.0.0.1:4096', directory: '/tmp',
+            question_api: true, error: null
+        })
+    }));
+
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+        localStorage.removeItem('wraith-engine');
+        localStorage.removeItem('wraith-opencode-session');
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+
+    await page.click('[data-engine="opencode"]');
+    await page.waitForTimeout(400);
+    await page.click('#btn-voice-call');
+
+    await page.waitForFunction(() => window.__fakeSockets.length > 0, { timeout: 8000 });
+    await page.evaluate(() => window.__fakeSockets[0].open());
+    await page.waitForTimeout(200);
+
+    const startMessage = await page.evaluate(() => {
+        const first = window.__fakeSockets[0].sent[0];
+        return typeof first === 'string' ? JSON.parse(first) : null;
+    });
+    await assertTrue(
+        startMessage && startMessage.type === 'start' && startMessage.engine === 'opencode',
+        'Voice call sends start with engine opencode',
+        JSON.stringify(startMessage)
+    );
+    await assertTrue(
+        await page.$eval('#voice-call-ui', el => el.classList.contains('active')),
+        'Voice overlay opens for streaming calls'
+    );
+
+    await page.evaluate(() => window.__fakeSockets[0].emit({ type: 'state', value: 'listening' }));
+    await page.waitForTimeout(150);
+    await assertContains(
+        await page.$eval('#transcription-preview', el => el.textContent),
+        'Listening',
+        'Listening state renders'
+    );
+
+    await page.evaluate(() => window.__fakeSockets[0].emit({ type: 'final', text: 'hello voice world' }));
+    await page.waitForTimeout(150);
+    await assertContains(await page.$eval('#chat-log', el => el.textContent), 'hello voice world', 'Final transcript appears in chat');
+    await assertContains(
+        await page.$eval('#transcription-preview', el => el.textContent),
+        'You said',
+        'Transcript preview updates'
+    );
+
+    await page.evaluate(() => window.__fakeSockets[0].emit({ type: 'state', value: 'speaking' }));
+    await page.evaluate(() => window.__fakeSockets[0].emit({ type: 'sentence', text: 'Here is the answer.' }));
+    await page.waitForTimeout(150);
+    await assertContains(
+        await page.$eval('#transcription-preview', el => el.textContent),
+        'Here is the answer.',
+        'Spoken sentence shows in preview'
+    );
+
+    // Barge-in: loud mic chunk during speaking must flush playback and notify the server.
+    await page.evaluate(() => {
+        const loud = new Int16Array(640).fill(20000);
+        handleVoiceMicChunk(loud);
+    });
+    await page.waitForTimeout(150);
+    const bargeInSent = await page.evaluate(() => window.__fakeSockets[0].sent
+        .filter(item => typeof item === 'string')
+        .map(item => JSON.parse(item))
+        .some(item => item.type === 'barge_in'));
+    await assertTrue(bargeInSent, 'Barge-in sends barge_in to the server');
+    await assertContains(
+        await page.$eval('#transcription-preview', el => el.textContent),
+        'Listening',
+        'Barge-in returns to listening state'
+    );
+
+    await page.evaluate(() => endStreamingVoiceCall());
+    await page.waitForTimeout(200);
+    await assertFalse(
+        await page.$eval('#voice-call-ui', el => el.classList.contains('active')),
+        'Ending the call closes the overlay'
+    );
+
+    await page.unroute('**/opencode/status');
+    await page.close();
+    page = previousPage;
+}
+
+/**
  * Run all tests
  */
 async function runAllTests() {
@@ -1418,6 +1852,8 @@ async function runAllTests() {
         await testGracefulDegradation();
         await testVadConfigWiring();
         await testAudioSourceReuse();
+        await testOpencodeUI();
+        await testStreamingVoiceUI();
         
         await teardownBrowser();
         

@@ -1,25 +1,36 @@
 #[cfg(test)]
 mod tests;
 
+mod opencode;
+mod speech;
+mod stt;
+mod tools;
+mod voice;
+
 use serde::Deserialize;
+use std::convert::Infallible;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::{
-    response::Html,
+    extract::ws::WebSocketUpgrade,
+    extract::ConnectInfo,
+    response::sse::{Event as SseEvent, Sse},
+    response::{Html, IntoResponse},
     routing::{get, post},
-    Form, Router,
+    Form, Json, Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use base64::prelude::*;
-use serde_json::json;
-use std::process::{Command, Stdio};
+use futures_util::{stream, Stream};
+use serde_json::{json, Value};
 use std::io::Write;
-use tempfile::NamedTempFile;
+use std::process::{Command, Stdio};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
 const MAX_RETRIES: u32 = 1;
@@ -33,6 +44,30 @@ struct Config {
     stt: Option<SttConfig>,
     vad: Option<VadConfig>,
     security: Option<SecurityConfig>,
+    opencode: Option<OpencodeConfig>,
+    voice: Option<VoiceConfigFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpencodeConfig {
+    executable: Option<String>,
+    directory: Option<String>,
+    agent: Option<String>,
+    model: Option<String>,
+    port: Option<u16>,
+    auto_start: Option<bool>,
+    extra_args: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VoiceConfigFile {
+    silence_ms: Option<u64>,
+    min_speech_ms: Option<u64>,
+    speed: Option<f64>,
+    narration: Option<String>,
+    interrupt_aborts: Option<bool>,
+    prewarm: Option<bool>,
+    debug: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,6 +195,138 @@ impl Config {
             .or_else(|| self.security.as_ref().and_then(|s| s.key_path.clone()))
             .unwrap_or_else(|| "key.pem".to_string())
     }
+
+    fn opencode_executable(&self) -> String {
+        env::var("WRAITH_OPENCODE_EXECUTABLE")
+            .ok()
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.executable.clone()))
+            .unwrap_or_else(|| "opencode".to_string())
+    }
+
+    fn opencode_directory(&self) -> String {
+        env::var("WRAITH_OPENCODE_DIRECTORY")
+            .ok()
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.directory.clone()))
+            .unwrap_or_default()
+    }
+
+    fn opencode_agent(&self) -> String {
+        env::var("WRAITH_OPENCODE_AGENT")
+            .ok()
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.agent.clone()))
+            .unwrap_or_default()
+    }
+
+    fn opencode_model(&self) -> String {
+        env::var("WRAITH_OPENCODE_MODEL")
+            .ok()
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.model.clone()))
+            .unwrap_or_default()
+    }
+
+    fn opencode_port(&self) -> u16 {
+        env::var("WRAITH_OPENCODE_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.port))
+            .unwrap_or(0)
+    }
+
+    fn opencode_auto_start(&self) -> bool {
+        env::var("WRAITH_OPENCODE_AUTO_START")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.auto_start))
+            .unwrap_or(false)
+    }
+
+    fn opencode_extra_args(&self) -> Vec<String> {
+        env::var("WRAITH_OPENCODE_EXTRA_ARGS")
+            .ok()
+            .map(|v| v.split_whitespace().map(str::to_string).collect())
+            .or_else(|| self.opencode.as_ref().and_then(|o| o.extra_args.clone()))
+            .unwrap_or_default()
+    }
+
+    fn opencode_settings(&self) -> opencode::OpencodeSettings {
+        opencode::OpencodeSettings {
+            executable: self.opencode_executable(),
+            directory: self.opencode_directory(),
+            agent: self.opencode_agent(),
+            model: self.opencode_model(),
+            port: self.opencode_port(),
+            extra_args: self.opencode_extra_args(),
+        }
+    }
+
+    fn voice_silence_ms(&self) -> u64 {
+        env::var("WRAITH_VOICE_SILENCE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .or_else(|| self.voice.as_ref().and_then(|v| v.silence_ms))
+            .unwrap_or(650)
+    }
+
+    fn voice_min_speech_ms(&self) -> u64 {
+        env::var("WRAITH_VOICE_MIN_SPEECH_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .or_else(|| self.voice.as_ref().and_then(|v| v.min_speech_ms))
+            .unwrap_or(350)
+    }
+
+    fn voice_speed(&self) -> f64 {
+        env::var("WRAITH_VOICE_SPEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .or_else(|| self.voice.as_ref().and_then(|v| v.speed))
+            .unwrap_or(1.0)
+            .clamp(0.5, 2.0)
+    }
+
+    fn voice_narration(&self) -> String {
+        env::var("WRAITH_VOICE_NARRATION")
+            .ok()
+            .or_else(|| self.voice.as_ref().and_then(|v| v.narration.clone()))
+            .unwrap_or_else(|| "tools".to_string())
+    }
+
+    fn voice_interrupt_aborts(&self) -> bool {
+        env::var("WRAITH_VOICE_INTERRUPT_ABORTS")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+            .or_else(|| self.voice.as_ref().and_then(|v| v.interrupt_aborts))
+            .unwrap_or(false)
+    }
+
+    fn voice_prewarm(&self) -> bool {
+        env::var("WRAITH_VOICE_PREWARM")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+            .or_else(|| self.voice.as_ref().and_then(|v| v.prewarm))
+            .unwrap_or(true)
+    }
+
+    fn voice_debug(&self) -> bool {
+        env::var("WRAITH_VOICE_DEBUG")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+            .or_else(|| self.voice.as_ref().and_then(|v| v.debug))
+            .unwrap_or(false)
+    }
+
+    fn voice_settings(&self) -> voice::VoiceSettings {
+        voice::VoiceSettings {
+            silence_ms: self.voice_silence_ms(),
+            min_speech_ms: self.voice_min_speech_ms(),
+            speed: self.voice_speed(),
+            narration: self.voice_narration(),
+            interrupt_aborts: self.voice_interrupt_aborts(),
+            prewarm: self.voice_prewarm(),
+            debug: self.voice_debug(),
+            tts_model: self.tts_model(),
+        }
+    }
 }
 
 fn get_config_path() -> Option<PathBuf> {
@@ -230,6 +397,8 @@ fn load_config() -> Config {
         stt: None,
         vad: None,
         security: None,
+        opencode: None,
+        voice: None,
     }
 }
 
@@ -263,8 +432,33 @@ fn print_config_info(config: &Config) {
     println!("    Cert: {}", config.cert_path());
     println!("    Key:  {}", config.key_path());
     println!();
+    println!("  opencode");
+    println!("    Executable: {}", config.opencode_executable());
+    let directory = config.opencode_directory();
+    if directory.is_empty() {
+        println!("    Directory:  (current working directory)");
+    } else {
+        println!("    Directory:  {}", directory);
+    }
+    print_option("    Agent:      ", &config.opencode_agent());
+    print_option("    Model:      ", &config.opencode_model());
+    println!("    Auto-start: {}", config.opencode_auto_start());
+    println!();
+    println!("  Voice");
+    println!("    Listen timeout: {}ms", config.voice_silence_ms());
+    println!("    Speed:          {}", config.voice_speed());
+    println!("    Narration:      {}", config.voice_narration());
+    println!();
     println!("  Override with env vars: WRAITH_*");
     println!();
+}
+
+fn print_option(label: &str, value: &str) {
+    if value.is_empty() {
+        println!("{label}(default)");
+    } else {
+        println!("{label}{value}");
+    }
 }
 
 fn create_app() -> Router {
@@ -274,9 +468,342 @@ fn create_app() -> Router {
         .route("/transcribe", post(transcribe))
         .route("/chat", post(chat))
         .route("/vad-config", get(vad_config))
+        .route("/history", get(get_history_handler))
         .route("/clear-history", post(clear_history_handler))
+        .route("/opencode/status", get(opencode_status))
+        .route("/opencode/start", post(opencode_start))
+        .route("/opencode/stop", post(opencode_stop))
+        .route("/opencode/events", get(opencode_events))
+        .route(
+            "/opencode/sessions",
+            get(opencode_sessions).post(opencode_create_session),
+        )
+        .route(
+            "/opencode/sessions/{session_id}",
+            axum::routing::delete(opencode_delete_session),
+        )
+        .route(
+            "/opencode/sessions/{session_id}/messages",
+            get(opencode_session_messages),
+        )
+        .route("/opencode/prompt", post(opencode_prompt))
+        .route("/opencode/message", post(opencode_message))
+        .route("/opencode/abort", post(opencode_abort))
+        .route("/opencode/permission", post(opencode_permission))
+        .route("/opencode/questions", get(opencode_questions))
+        .route("/opencode/question", post(opencode_answer_question))
+        .route(
+            "/opencode/question/reject",
+            post(opencode_reject_question),
+        )
+        .route("/api/tools/status", get(tools_status))
+        .route("/api/tools/install", post(tools_install))
+        .route("/api/tools/install/stream", get(tools_install_stream))
+        .route("/voice/config", get(voice_config))
+        .route("/voice/metrics", get(voice_metrics))
+        .route("/ws/voice", get(voice_socket))
         .route("/", get(home))
         .layer(cors)
+}
+
+static VOICE_HUB: OnceLock<Arc<voice::VoiceHub>> = OnceLock::new();
+
+fn voice_hub() -> &'static Arc<voice::VoiceHub> {
+    VOICE_HUB.get_or_init(voice::VoiceHub::new)
+}
+
+async fn voice_socket(ws: WebSocketUpgrade) -> impl IntoResponse {
+    let settings = cached_config().voice_settings();
+    let manager = Arc::clone(opencode_manager());
+    ws.on_upgrade(move |socket| voice::run_voice_socket(socket, settings, manager, Arc::clone(voice_hub())))
+}
+
+async fn voice_config() -> Json<Value> {
+    let settings = cached_config().voice_settings();
+    let sample_rate = speech::sample_rate_from_model(&settings.tts_model)
+        .unwrap_or(speech::DEFAULT_SAMPLE_RATE);
+    let piper_available = opencode::find_executable("piper-tts").is_some();
+
+    Json(json!({
+        "silence_ms": settings.silence_ms,
+        "min_speech_ms": settings.min_speech_ms,
+        "speed": settings.speed,
+        "narration": settings.narration,
+        "interrupt_aborts": settings.interrupt_aborts,
+        "prewarm": settings.prewarm,
+        "debug": settings.debug,
+        "sample_rate": sample_rate,
+        "piper_available": piper_available,
+    }))
+}
+
+async fn voice_metrics() -> Json<Value> {
+    Json(voice_hub().metrics().await)
+}
+
+static OPENCODE_MANAGER: OnceLock<Arc<opencode::OpencodeManager>> = OnceLock::new();
+static TOOL_STATE: OnceLock<Arc<tools::ToolState>> = OnceLock::new();
+
+fn opencode_manager() -> &'static Arc<opencode::OpencodeManager> {
+    OPENCODE_MANAGER.get_or_init(|| {
+        opencode::OpencodeManager::new(cached_config().opencode_settings())
+    })
+}
+
+fn tool_state() -> &'static Arc<tools::ToolState> {
+    TOOL_STATE.get_or_init(tools::ToolState::new)
+}
+
+type ApiError = (axum::http::StatusCode, Json<Value>);
+
+fn api_error(status: axum::http::StatusCode, message: impl Into<String>) -> ApiError {
+    (status, Json(json!({ "error": message.into() })))
+}
+
+fn bad_gateway(message: impl Into<String>) -> ApiError {
+    api_error(axum::http::StatusCode::BAD_GATEWAY, message)
+}
+
+fn json_stream(
+    receiver: broadcast::Receiver<Value>,
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(value) => {
+                    let data = serde_json::to_string(&value).unwrap_or_default();
+                    return Some((Ok(SseEvent::default().data(data)), receiver));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    })
+}
+
+fn line_stream(
+    receiver: broadcast::Receiver<String>,
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(line) => {
+                    return Some((Ok(SseEvent::default().data(line)), receiver));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    })
+}
+
+async fn opencode_status() -> Json<opencode::OpencodeStatus> {
+    Json(opencode_manager().status().await)
+}
+
+async fn opencode_start() -> Result<Json<Value>, ApiError> {
+    match opencode_manager().ensure_running().await {
+        Ok(base_url) => Ok(Json(json!({ "ok": true, "base_url": base_url }))),
+        Err(e) => Err(bad_gateway(e)),
+    }
+}
+
+async fn opencode_stop() -> Json<Value> {
+    opencode_manager().stop().await;
+    Json(json!({ "ok": true }))
+}
+
+async fn opencode_events() -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    Sse::new(json_stream(opencode_manager().subscribe()))
+        .keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+async fn opencode_sessions() -> Result<Json<Value>, ApiError> {
+    opencode_manager().list_sessions().await.map(Json).map_err(bad_gateway)
+}
+
+async fn opencode_create_session(
+    Json(payload): Json<CreateSessionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .create_session(payload.title)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_delete_session(
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .delete_session(&session_id)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_session_messages(
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .list_messages(&session_id)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_prompt(
+    Json(payload): Json<OpencodePromptRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .prompt_async(
+            &payload.session_id,
+            &payload.text,
+            payload.agent.as_deref(),
+            payload.model.as_deref(),
+        )
+        .await
+        .map(|_| Json(json!({ "ok": true })))
+        .map_err(bad_gateway)
+}
+
+async fn opencode_message(
+    Json(payload): Json<OpencodePromptRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .prompt_blocking(
+            &payload.session_id,
+            &payload.text,
+            payload.agent.as_deref(),
+            payload.model.as_deref(),
+        )
+        .await
+        .map(|text| Json(json!({ "text": text })))
+        .map_err(bad_gateway)
+}
+
+async fn opencode_abort(
+    Json(payload): Json<SessionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .abort(&payload.session_id)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_permission(
+    Json(payload): Json<PermissionReplyRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .reply_permission(
+            &payload.session_id,
+            &payload.permission_id,
+            &payload.response,
+            payload.remember,
+        )
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_questions() -> Result<Json<Value>, ApiError> {
+    opencode_manager().list_questions().await.map(Json).map_err(bad_gateway)
+}
+
+async fn opencode_answer_question(
+    Json(payload): Json<QuestionReplyRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .reply_question(&payload.request_id, payload.answers)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn opencode_reject_question(
+    Json(payload): Json<QuestionRejectRequest>,
+) -> Result<Json<Value>, ApiError> {
+    opencode_manager()
+        .reject_question(&payload.request_id)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}
+
+async fn tools_status() -> Json<Value> {
+    let stt = cached_config().stt_executable();
+    let mut status = tool_state().status(&stt).await;
+    if let Some(object) = status.as_object_mut() {
+        object.insert("install".to_string(), tool_state().install_status());
+    }
+    Json(status)
+}
+
+async fn tools_install(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(payload): Json<InstallRequest>,
+) -> Result<Json<Value>, ApiError> {
+    if !addr.ip().is_loopback() {
+        return Err(api_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "installing tools is only allowed from this machine",
+        ));
+    }
+
+    match tool_state().start_install(&payload.tool, &payload.method) {
+        Ok(command) => Ok(Json(json!({ "ok": true, "command": command }))),
+        Err(e) => Err(api_error(axum::http::StatusCode::BAD_REQUEST, e)),
+    }
+}
+
+async fn tools_install_stream() -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    Sse::new(line_stream(tool_state().subscribe()))
+        .keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+#[derive(Deserialize)]
+struct CreateSessionRequest {
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpencodePromptRequest {
+    session_id: String,
+    text: String,
+    agent: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SessionRequest {
+    session_id: String,
+}
+
+#[derive(Deserialize)]
+struct PermissionReplyRequest {
+    session_id: String,
+    permission_id: String,
+    response: String,
+    #[serde(default)]
+    remember: bool,
+}
+
+#[derive(Deserialize)]
+struct QuestionReplyRequest {
+    request_id: String,
+    answers: Vec<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct QuestionRejectRequest {
+    request_id: String,
+}
+
+#[derive(Deserialize)]
+struct InstallRequest {
+    tool: String,
+    method: String,
 }
 
 async fn get_history_handler() -> axum::Json<Vec<ChatMessage>> {
@@ -289,7 +816,7 @@ async fn get_history_handler() -> axum::Json<Vec<ChatMessage>> {
 
 async fn serve_https(addr: SocketAddr, tls_config: RustlsConfig, app: Router) {
     println!("HTTPS server launched. Listening on https://{addr}");
-    let service = app.into_make_service();
+    let service = app.into_make_service_with_connect_info::<SocketAddr>();
     axum_server::bind_rustls(addr, tls_config)
         .serve(service)
         .await
@@ -301,10 +828,23 @@ async fn main() {
     let config = load_config();
     print_config_info(&config);
     validate_external_tools(&config);
-    
+
     let saved_history = load_history_from_disk();
     if let Ok(mut history) = get_chat_history().lock() {
         *history = saved_history;
+    }
+
+    watch_for_shutdown();
+    opencode_manager().start_event_pump();
+
+    if config.opencode_auto_start() && opencode::find_executable(&config.opencode_executable()).is_some() {
+        let manager = Arc::clone(opencode_manager());
+        tokio::spawn(async move {
+            match manager.ensure_running().await {
+                Ok(base_url) => println!("[opencode] auto-started at {base_url}"),
+                Err(e) => eprintln!("[opencode] auto-start failed: {e}"),
+            }
+        });
     }
 
     let app = create_app();
@@ -408,7 +948,43 @@ fn validate_external_tools(config: &Config) {
     println!();
 }
 
-fn which(program: &str) -> Option<PathBuf> {
+fn watch_for_shutdown() {
+    tokio::spawn(async {
+        #[cfg(unix)]
+        {
+            let mut terminate = tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            )
+            .ok();
+
+            let terminated = async {
+                match terminate.as_mut() {
+                    Some(signal) => {
+                        signal.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminated => {}
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+
+        println!();
+        println!("[wraith] shutting down");
+        opencode_manager().stop().await;
+        std::process::exit(0);
+    });
+}
+
+pub(crate) fn which(program: &str) -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|paths| {
         for path in std::env::split_paths(&paths) {
             let full_path = path.join(program);
@@ -518,8 +1094,6 @@ async fn synthesize(Form(payload): Form<SynthesizeRequest>) -> Html<String> {
 }
 
 async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
-    let config = cached_config();
-
     let audio_data = match BASE64_STANDARD.decode(&payload.audio_base64) {
         Ok(data) => data,
         Err(e) => {
@@ -528,113 +1102,29 @@ async fn transcribe(Form(payload): Form<TranscribeRequest>) -> Html<String> {
         }
     };
 
-    let mut temp_file = match NamedTempFile::new() {
-        Ok(file) => file,
-        Err(e) => {
-            eprintln!("[ERROR] Failed to create temp file: {}", e);
-            return Html(String::from("ERROR:TEMP_FILE_FAILED"));
-        }
-    };
-
-    if let Err(e) = temp_file.write_all(&audio_data) {
-        eprintln!("[ERROR] Failed to write audio to temp file: {}", e);
-        return Html(String::from("ERROR:TEMP_WRITE_FAILED"));
-    }
-
-    let temp_path = temp_file.path().to_str().unwrap().to_string();
-
-    let wav_file = match NamedTempFile::with_suffix(".wav") {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[ERROR] Failed to create wav temp file: {}", e);
-            return Html(String::from("ERROR:TEMP_WAV_FAILED"));
-        }
-    };
-    let wav_path = wav_file.path().to_str().unwrap().to_string();
-
-    let ffmpeg_result = run_with_retry("ffmpeg", || {
-        let output = Command::new("ffmpeg")
-            .arg("-y")
-            .arg("-i")
-            .arg(&temp_path)
-            .arg("-ar")
-            .arg("16000")
-            .arg("-ac")
-            .arg("1")
-            .arg(&wav_path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("ffmpeg conversion failed: {}", stderr));
-        }
-        Ok(())
-    });
-
-    if let Err(e) = ffmpeg_result {
-        eprintln!("[ERROR] ffmpeg failed after retries: {}", e);
-        return Html(String::from("ERROR:FFMPEG_FAILED"));
-    }
-
-    let stt_executable = config.stt_executable();
-
-    let output = run_with_retry(&stt_executable, || {
-        Command::new(&stt_executable)
-            .arg("--quiet")
-            .arg("transcribe")
-            .arg(&wav_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| format!("Failed to execute {}: {}", stt_executable, e))
-    });
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout).to_string();
-                let clean_text = text
-                    .split("\n\n")
-                    .last()
-                    .unwrap_or(&text)
-                    .trim()
-                    .to_string();
-
-                if clean_text.is_empty() {
-                    Html(String::from("ERROR:EMPTY_TRANSCRIPTION"))
-                } else {
-                    Html(clean_text)
-                }
-            } else {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                eprintln!(
-                    "[ERROR] {} exited with status {:?}: {}",
-                    stt_executable, out.status, stderr
-                );
-                Html(String::from("ERROR:STT_FAILED"))
-            }
-        }
-        Err(e) => {
-            eprintln!("[ERROR] STT failed after retries: {}", e);
-            Html(String::from("ERROR:STT_FAILED"))
+    match stt::transcribe_audio_bytes(&audio_data) {
+        Ok(text) => Html(text),
+        Err(code) => {
+            let marker = code.split(':').next().unwrap_or("STT_FAILED");
+            eprintln!("[ERROR] transcription failed: {code}");
+            Html(format!("ERROR:{marker}"))
         }
     }
 }
 
-async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
-    let config = load_config();
-
-    if payload.text.trim().is_empty() {
-        return Html(String::new());
+pub(crate) async fn local_chat(text: &str) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Ok(String::new());
     }
 
+    let config = cached_config();
     let client = reqwest::Client::new();
-    
-    let history = get_chat_history().lock().map(|h| h.clone()).unwrap_or_default();
-    
+
+    let history = get_chat_history()
+        .lock()
+        .map(|h| h.clone())
+        .unwrap_or_default();
+
     let mut messages = vec![
         json!({
             "role": "system",
@@ -656,7 +1146,7 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
 
     messages.push(json!({
         "role": "user",
-        "content": payload.text
+        "content": text
     }));
 
     let request_body = json!({
@@ -668,44 +1158,57 @@ async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
     });
 
     let endpoint = config.llm_endpoint();
-    let res = client
+    let response = client
         .post(&endpoint)
         .json(&request_body)
         .send()
-        .await;
+        .await
+        .map_err(|e| {
+            eprintln!("Reqwest error calling LLM: {e}");
+            "Error connecting to AI Server.".to_string()
+        })?;
 
-    match res {
-        Ok(response) => {
-            if response.status().is_success() {
-                if let Ok(lm_res) = response.json::<LmStudioResponse>().await {
-                    if let Some(choice) = lm_res.choices.first() {
-                        let content = choice.message.content.clone();
-                        
-                        if let Ok(mut history) = get_chat_history().lock() {
-                            history.push(ChatMessage {
-                                role: "user".to_string(),
-                                content: payload.text.clone()
-                            });
-                            history.push(ChatMessage {
-                                role: "assistant".to_string(),
-                                content: content.clone()
-                            });
-                            if history.len() > 20 {
-                                history.drain(0..4);
-                            }
-                            save_history_to_disk(&history);
-                        }
-                        
-                        return Html(content);
-                    }
-                }
-            }
-            Html(String::from("Error: Failed to parse AI response."))
+    if !response.status().is_success() {
+        return Err("Error: Failed to parse AI response.".to_string());
+    }
+
+    let parsed = response
+        .json::<LmStudioResponse>()
+        .await
+        .map_err(|_| "Error: Failed to parse AI response.".to_string())?;
+
+    let content = parsed
+        .choices
+        .first()
+        .map(|choice| choice.message.content.clone())
+        .ok_or_else(|| "Error: Failed to parse AI response.".to_string())?;
+
+    if let Ok(mut history) = get_chat_history().lock() {
+        history.push(ChatMessage {
+            role: "user".to_string(),
+            content: text.to_string(),
+        });
+        history.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: content.clone(),
+        });
+        if history.len() > 20 {
+            history.drain(0..4);
         }
-        Err(e) => {
-            eprintln!("Reqwest error calling LLM: {}", e);
-            Html(String::from("Error connecting to AI Server."))
-        }
+        save_history_to_disk(&history);
+    }
+
+    Ok(content)
+}
+
+async fn chat(Form(payload): Form<ChatRequest>) -> Html<String> {
+    if payload.text.trim().is_empty() {
+        return Html(String::new());
+    }
+
+    match local_chat(&payload.text).await {
+        Ok(content) => Html(content),
+        Err(message) => Html(message),
     }
 }
 

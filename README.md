@@ -15,6 +15,7 @@ An always-available AI companion that runs entirely offline on modest hardware. 
 - **Interruption Support**: Kill AI speech mid-playback with a loud noise or voice spike
 - **Text Input Fallback**: Type messages when speaking isn't convenient
 - **Local LLM**: Powered by LM Studio with models up to 4B parameters
+- **opencode Engine**: Chat with the opencode agent (tools, sessions, permissions) from the same UI
 
 ## Architecture
 
@@ -24,12 +25,18 @@ An always-available AI companion that runs entirely offline on modest hardware. 
 │   (WebUI)   │◀────│   Server    │◀────│  (LLM API)  │
 └─────────────┘     └──────┬──────┘     └─────────────┘
                            │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-         ┌─────────┐ ┌─────────┐ ┌─────────┐
-         │ voxtype │ │  ffmpeg │ │ piper   │
-         │  (STT)  │ │(format) │ │  (TTS)  │
-         └─────────┘ └─────────┘ └─────────┘
+                           ├──────────────────────────────┐
+                           │                              │
+                           ▼                              ▼
+                    ┌─────────────┐                ┌─────────────┐
+                    │  opencode   │                │  voxtype /  │
+                    │ serve (mgr) │                │  piper /    │
+                    │  HTTP+SSE   │                │  ffmpeg     │
+                    └──────┬──────┘                └─────────────┘
+                           │
+                           ▼
+                 agents, tools, permissions,
+                 sessions, PTY workers
 ```
 
 ## Prerequisites
@@ -50,6 +57,11 @@ sudo apt install ffmpeg
 |------|---------|---------|
 | **voxtype** | Speech-to-text | [voxtype](https://github.com/taylor-vann/voxtype) |
 | **piper-tts** | Text-to-speech | [piper](https://github.com/rhasspy/piper) |
+| **opencode** (optional) | Agent engine with tools | [opencode.ai](https://opencode.ai/docs/) — Wraith detects it and can install it from the UI |
+
+> opencode is optional. Without it, Wraith keeps using the LM Studio engine.
+> When it is missing, switching to the opencode engine shows an install card
+> with platform-specific commands and a one-click installer (local requests only).
 
 ### Models
 
@@ -88,6 +100,42 @@ wraith/
 ```
 
 ## Usage Modes
+
+### Engines
+
+The **LOCAL / OPENCODE** switch in the header picks the chat backend:
+
+- **LOCAL** — the LM Studio model. Fully offline, no tools.
+- **OPENCODE** — a managed `opencode serve` process, bound to `127.0.0.1` with a
+  random password. Replies stream into the chat, tool calls render as cards,
+  permission requests open a modal (Allow once / Always / Reject), and the
+  opencode bar provides session list/resume, abort, and delete.
+
+Text chat uses opencode's streaming event API. Voice calls use the blocking API
+(speak → transcribe → opencode turn → synthesize); streaming voice narration for
+opencode is on the roadmap.
+
+### Streaming voice call (opencode)
+
+With the opencode engine selected, **Voice Call** opens a WebSocket session:
+
+- Microphone audio is captured in an AudioWorklet, downsampled to 16 kHz PCM and
+  streamed to the server; voice activity detection endpoints the turn.
+- opencode's reply is chunked into sentences and spoken as it streams, through a
+  persistent piper process (`--output_raw`), so speech starts before the answer
+  is complete.
+- Tool activity is narrated ("Running a command.", "Reading a file."), and
+  retries are announced instead of silence.
+- **Barge-in**: talking over the assistant flushes playback immediately. Set
+  `[voice] interrupt_aborts = true` to also abort the running turn.
+- Voice commands: "speak faster", "speak slower", "normal speed", "stop".
+- Permissions and questions are spoken; answer with "yes", "no", "always", or an
+  option label.
+- `[voice] debug = true` logs per-turn latency and exposes `GET /voice/metrics`
+  (time to first token/audio).
+
+Headphones are recommended for true full-duplex on a laptop (browser echo
+cancellation can only do so much through speakers).
 
 ### Voice Call (Hands-Free)
 
@@ -220,6 +268,17 @@ min_recording_duration_ms = 500
 [security]
 cert_path = "cert.pem"
 key_path = "key.pem"
+
+# opencode engine (optional). When `directory` is empty, Wraith uses its own
+# working directory. `port = 0` picks a random local port for the managed server.
+[opencode]
+executable = "opencode"
+directory = ""
+agent = ""              # optional agent name, e.g. "build"
+model = ""              # optional provider/model, e.g. "opencode/gpt-5.1-codex"
+port = 0
+auto_start = false
+extra_args = []
 ```
 
 ### Environment Variables
@@ -242,6 +301,20 @@ the browser/frontend VAD implementation:
 | `WRAITH_VAD_MIN_RECORDING_MS` | Planned: minimum recording duration (ms); not yet hooked up to frontend VAD |
 | `WRAITH_CERT_PATH` | TLS certificate path |
 | `WRAITH_KEY_PATH` | TLS key path |
+| `WRAITH_OPENCODE_EXECUTABLE` | opencode executable name/path |
+| `WRAITH_OPENCODE_DIRECTORY` | Working directory for the managed opencode server |
+| `WRAITH_OPENCODE_AGENT` | Default opencode agent for Wraith sessions |
+| `WRAITH_OPENCODE_MODEL` | Default `provider/model` for Wraith sessions |
+| `WRAITH_OPENCODE_PORT` | Fixed port for the managed server (0 = random) |
+| `WRAITH_OPENCODE_AUTO_START` | Start the managed server at boot (`true`/`1`) |
+| `WRAITH_OPENCODE_EXTRA_ARGS` | Extra args passed to `opencode serve` |
+| `WRAITH_VOICE_SILENCE_MS` | Voice-call end-of-speech timeout |
+| `WRAITH_VOICE_MIN_SPEECH_MS` | Minimum speech before ending a turn |
+| `WRAITH_VOICE_SPEED` | TTS rate (0.5–2.0) |
+| `WRAITH_VOICE_NARRATION` | `off`, `tools` or `thoughts` |
+| `WRAITH_VOICE_INTERRUPT_ABORTS` | Barge-in aborts the running turn |
+| `WRAITH_VOICE_PREWARM` | Pre-warm piper at call start |
+| `WRAITH_VOICE_DEBUG` | Log per-turn latency and expose `/voice/metrics` |
 | `WRAITH_CONFIG` | Custom config file path |
 
 ## Contributing

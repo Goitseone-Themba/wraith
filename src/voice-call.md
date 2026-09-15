@@ -1,5 +1,34 @@
 # Voice Call Flow Analysis
 
+## Streaming voice call (opencode engine, 2026-09-15)
+
+The legacy loop below still handles the LOCAL engine. When the opencode engine is
+selected, voice calls use `GET /ws/voice` instead:
+
+```
+Browser AudioWorklet (16 kHz PCM) ──binary──▶ /ws/voice
+      │                                          │
+      │ client VAD: endpoint / barge_in          ▼
+      │                              src/voice.rs session
+      │                                ├── src/stt.rs (voxtype)
+      │                                ├── OpencodeManager prompt_async + /event
+      │                                │     (message.part.delta → SentenceChunker)
+      │                                └── PiperWorker --output_raw ──binary──▶ playback worklet
+```
+
+- `start` → the server creates/reuses an opencode session and pre-warms piper.
+- `endpoint` → accumulates PCM, transcribes, then runs a turn.
+- Text deltas are chunked into sentences; each sentence goes to piper and the raw
+  PCM is streamed back for immediate playback.
+- `barge_in` → playback is flushed client-side, piper is restarted server-side,
+  and the turn is cancelled when `[voice] interrupt_aborts = true`.
+- Permission/question events are spoken and answered by keyword; speed commands
+  ("speak faster") are intercepted before reaching the model.
+- Per-turn latency is available at `GET /voice/metrics`.
+
+The sections below document the original hands-free loop, which remains the
+fallback implementation.
+
 ## Overview
 
 The voice call mode is Wraith's hands-free interaction loop. This document traces the complete flow, identifies state transitions, and performs root cause analysis on known and suspected issues.
