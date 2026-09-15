@@ -107,17 +107,26 @@ Last updated: 2026-09-15
       whisper.cpp — endpointing + streaming replies already cover the latency
       budget on this machine)
 
-### Phase 3: Conversational conductor — ⬜ Pending
+### Phase 3: Conversational conductor — ✅ Complete (2026-09-15)
 
-- [ ] Voice-optimized agent prompt (zero-install via `system` override)
-- [ ] Optional project-local agent/tool files for agent-initiated speech
-- [ ] Rate-limit/retry narration
+- [x] Voice-optimized agent prompt (zero-install via `system` override)
+- [x] Project-local agent/tool files (opt-in, managed, loopback-only)
+- [x] `wraith_say` bridge and multi-question voice answering
+- [x] Retry/rate-limit narration
+- [x] Fast-lane gate: warm first audio 2.14 s < 2.5 s target, so deferred
 
-### Phase 4: Orchestration — ⬜ Pending
+### Phase 4: Orchestration — 🔄 Core complete (2026-09-15)
 
-- [ ] Parallel worker sessions on one server
-- [ ] Optional PTY/tmux workers with worktree isolation
-- [ ] Worker dashboard and narration
+- [x] Parallel worker sessions on one server (`/opencode/workers`)
+- [x] Worker dashboard (spawn, status, abort, delete, switch session)
+- [x] `wraith_worker` tool for the voice conductor
+- [ ] PTY/tmux backend and worktree isolation (deferred)
+
+### Phase 5: Portability — ✅ Complete (2026-09-15)
+
+- [x] Auto-generated self-signed TLS (`rcgen`, SANs, 0600 key)
+- [x] CI + musl release workflows
+- [x] README/config docs updated
 
 ---
 

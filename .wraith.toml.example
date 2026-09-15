@@ -15,7 +15,7 @@
 #   WRAITH_OPENCODE_AUTO_START, WRAITH_OPENCODE_EXTRA_ARGS,
 #   WRAITH_VOICE_SILENCE_MS, WRAITH_VOICE_MIN_SPEECH_MS, WRAITH_VOICE_SPEED,
 #   WRAITH_VOICE_NARRATION, WRAITH_VOICE_INTERRUPT_ABORTS, WRAITH_VOICE_PREWARM,
-#   WRAITH_VOICE_DEBUG
+#   WRAITH_VOICE_DEBUG, WRAITH_AUTO_TLS
 
 [server]
 host = "0.0.0.0"
@@ -40,6 +40,7 @@ min_recording_duration_ms = 500
 [security]
 cert_path = "cert.pem"
 key_path = "key.pem"
+auto_tls = true       # generate a self-signed certificate when files are missing
 
 # opencode engine (optional)
 # Wraith manages a local `opencode serve` process bound to 127.0.0.1 with a

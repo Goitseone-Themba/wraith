@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests;
 
+mod agent;
 mod opencode;
 mod speech;
 mod stt;
+mod tls;
 mod tools;
 mod voice;
 
@@ -104,6 +106,7 @@ struct VadConfig {
 struct SecurityConfig {
     cert_path: Option<String>,
     key_path: Option<String>,
+    auto_tls: Option<bool>,
 }
 
 impl Config {
@@ -196,6 +199,14 @@ impl Config {
             .unwrap_or_else(|| "key.pem".to_string())
     }
 
+    fn auto_tls(&self) -> bool {
+        env::var("WRAITH_AUTO_TLS")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+            .or_else(|| self.security.as_ref().and_then(|s| s.auto_tls))
+            .unwrap_or(true)
+    }
+
     fn opencode_executable(&self) -> String {
         env::var("WRAITH_OPENCODE_EXECUTABLE")
             .ok()
@@ -256,6 +267,8 @@ impl Config {
             model: self.opencode_model(),
             port: self.opencode_port(),
             extra_args: self.opencode_extra_args(),
+            bridge_url: format!("http://127.0.0.1:{}", self.server_port()),
+            bridge_token: bridge_token(),
         }
     }
 
@@ -431,6 +444,7 @@ fn print_config_info(config: &Config) {
     println!("  Security");
     println!("    Cert: {}", config.cert_path());
     println!("    Key:  {}", config.key_path());
+    println!("    Auto TLS: {}", config.auto_tls());
     println!();
     println!("  opencode");
     println!("    Executable: {}", config.opencode_executable());
@@ -502,14 +516,192 @@ fn create_app() -> Router {
         .route("/voice/config", get(voice_config))
         .route("/voice/metrics", get(voice_metrics))
         .route("/ws/voice", get(voice_socket))
+        .route("/opencode/workers", get(opencode_workers).post(opencode_worker_spawn))
+        .route("/agent/worker", post(agent_worker))
+        .route("/opencode/agent/status", get(agent_status))
+        .route("/opencode/agent/install", post(agent_install))
+        .route("/opencode/agent/remove", post(agent_remove))
+        .route("/agent/say", post(agent_say))
         .route("/", get(home))
         .layer(cors)
 }
 
 static VOICE_HUB: OnceLock<Arc<voice::VoiceHub>> = OnceLock::new();
+static BRIDGE_TOKEN: OnceLock<String> = OnceLock::new();
+
+/// Token shared with the managed opencode process so its tools can call back.
+pub(crate) fn bridge_token() -> String {
+    BRIDGE_TOKEN
+        .get_or_init(|| uuid::Uuid::new_v4().to_string())
+        .clone()
+}
 
 fn voice_hub() -> &'static Arc<voice::VoiceHub> {
     VOICE_HUB.get_or_init(voice::VoiceHub::new)
+}
+
+const WORKER_PREFIX: &str = "Worker: ";
+
+async fn opencode_workers() -> Result<Json<Value>, ApiError> {
+    let manager = opencode_manager();
+    let sessions = manager.list_sessions().await.map_err(bad_gateway)?;
+    let statuses = manager
+        .api_get("/session/status")
+        .await
+        .unwrap_or_else(|_| json!({}));
+
+    let workers: Vec<Value> = sessions
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|session| {
+            session
+                .get("title")
+                .and_then(|t| t.as_str())
+                .map(|title| title.starts_with(WORKER_PREFIX))
+                .unwrap_or(false)
+        })
+        .map(|mut session| {
+            let id = session
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or_default()
+                .to_string();
+            session["status"] = statuses
+                .get(id.as_str())
+                .cloned()
+                .unwrap_or(json!({ "type": "idle" }));
+            session
+        })
+        .collect();
+
+    Ok(Json(json!({ "workers": workers })))
+}
+
+#[derive(Deserialize)]
+struct WorkerRequest {
+    prompt: String,
+    title: Option<String>,
+}
+
+fn worker_session_title(payload: &WorkerRequest) -> String {
+    let title = payload
+        .title
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| opencode::worker_title(&payload.prompt));
+    format!("{WORKER_PREFIX}{title}")
+}
+
+async fn spawn_worker(payload: WorkerRequest) -> Result<Value, String> {
+    let manager = opencode_manager();
+    let session = manager
+        .create_session(Some(worker_session_title(&payload)))
+        .await?;
+    let id = session
+        .get("id")
+        .and_then(|i| i.as_str())
+        .ok_or_else(|| "worker session missing id".to_string())?
+        .to_string();
+
+    manager
+        .prompt_async(&id, &payload.prompt, None, None)
+        .await?;
+
+    Ok(json!({ "ok": true, "worker": session }))
+}
+
+async fn opencode_worker_spawn(
+    Json(payload): Json<WorkerRequest>,
+) -> Result<Json<Value>, ApiError> {
+    spawn_worker(payload).await.map(Json).map_err(bad_gateway)
+}
+
+async fn agent_worker(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<WorkerRequest>,
+) -> Result<Json<Value>, ApiError> {
+    loopback(&addr)?;
+
+    let token = headers
+        .get("x-wraith-token")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if token != bridge_token() {
+        return Err(api_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "invalid bridge token",
+        ));
+    }
+
+    spawn_worker(payload).await.map(Json).map_err(bad_gateway)
+}
+
+async fn agent_status() -> Json<Value> {
+    let directory = opencode::effective_directory(&cached_config().opencode_directory());
+    Json(serde_json::to_value(agent::status(&directory)).unwrap_or_else(|_| json!({})))
+}
+
+fn loopback(addr: &SocketAddr) -> Result<(), ApiError> {
+    if addr.ip().is_loopback() {
+        Ok(())
+    } else {
+        Err(api_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "this action is only allowed from this machine",
+        ))
+    }
+}
+
+async fn agent_install(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Result<Json<Value>, ApiError> {
+    loopback(&addr)?;
+    let directory = opencode::effective_directory(&cached_config().opencode_directory());
+    agent::install(&directory)
+        .map(|status| Json(serde_json::to_value(status).unwrap_or_else(|_| json!({}))))
+        .map_err(|e| api_error(axum::http::StatusCode::BAD_REQUEST, e))
+}
+
+async fn agent_remove(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Result<Json<Value>, ApiError> {
+    loopback(&addr)?;
+    let directory = opencode::effective_directory(&cached_config().opencode_directory());
+    agent::remove(&directory)
+        .map(|status| Json(serde_json::to_value(status).unwrap_or_else(|_| json!({}))))
+        .map_err(|e| api_error(axum::http::StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+struct AgentSayRequest {
+    text: String,
+}
+
+async fn agent_say(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<AgentSayRequest>,
+) -> Result<Json<Value>, ApiError> {
+    loopback(&addr)?;
+
+    let token = headers
+        .get("x-wraith-token")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if token != bridge_token() {
+        return Err(api_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "invalid bridge token",
+        ));
+    }
+
+    match voice_hub().say(&payload.text).await {
+        Ok(()) => Ok(Json(json!({ "ok": true }))),
+        Err(e) => Err(api_error(axum::http::StatusCode::SERVICE_UNAVAILABLE, e)),
+    }
 }
 
 async fn voice_socket(ws: WebSocketUpgrade) -> impl IntoResponse {
@@ -865,10 +1057,16 @@ async fn main() {
         }
     };
 
-    let cert_path = config.cert_path();
-    let key_path = config.key_path();
+    let (cert_path, key_path) =
+        match tls::ensure_tls(&config.cert_path(), &config.key_path(), config.auto_tls()) {
+            Ok(paths) => paths,
+            Err(message) => {
+                eprintln!("{message}");
+                std::process::exit(1);
+            }
+        };
 
-    if fs::metadata(&cert_path).is_ok() && fs::metadata(&key_path).is_ok() {
+    {
         println!("Found TLS certificates, starting HTTPS server...");
 
         let tls_config = match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
@@ -895,18 +1093,6 @@ async fn main() {
         println!();
 
         serve_https(https_addr, tls_config, app).await;
-    } else {
-        println!();
-        println!("TLS certificates not found!");
-        println!();
-        println!("Generate certificates with:");
-        println!("  openssl req -x509 -newkey rsa:4096 \\");
-        println!("    -keyout {} -out {} \\", key_path, cert_path);
-        println!("    -days 365 -nodes");
-        println!();
-        println!("Then run: cargo run --release");
-        println!();
-        std::process::exit(1);
     }
 }
 

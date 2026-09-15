@@ -10,6 +10,7 @@ base64 = "0.22.1"
 bytes = "1"
 futures-util = "0.3.32"
 regex = "1.12.3"
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 reqwest = { version = "0.13.2", features = ["json", "stream"] }
 rustls = "0.23"
 serde = { version = "1.0.228", features = ["derive"] }

@@ -26,6 +26,8 @@ pub struct OpencodeSettings {
     pub model: String,
     pub port: u16,
     pub extra_args: Vec<String>,
+    pub bridge_url: String,
+    pub bridge_token: String,
 }
 
 struct Running {
@@ -168,6 +170,8 @@ impl OpencodeManager {
             .arg(port.to_string())
             .current_dir(&directory)
             .env("OPENCODE_SERVER_PASSWORD", &password)
+            .env("WRAITH_BRIDGE_URL", &self.settings.bridge_url)
+            .env("WRAITH_BRIDGE_TOKEN", &self.settings.bridge_token)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -623,7 +627,7 @@ impl OpencodeManager {
     }
 }
 
-fn effective_directory(directory: &str) -> String {
+pub(crate) fn effective_directory(directory: &str) -> String {
     if directory.trim().is_empty() {
         std::env::current_dir()
             .map(|p| p.display().to_string())
@@ -695,6 +699,20 @@ pub fn extract_text_parts(response: &Value) -> String {
                 .join("\n")
         })
         .unwrap_or_default()
+}
+
+/// Builds a worker session title from a task prompt.
+pub fn worker_title(prompt: &str) -> String {
+    let cleaned = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut title: String = cleaned.chars().take(60).collect();
+    if cleaned.chars().count() > 60 {
+        title.push('…');
+    }
+    if title.is_empty() {
+        "task".to_string()
+    } else {
+        title
+    }
 }
 
 /// Pick a port for the managed server when none is configured.

@@ -26,6 +26,8 @@ fn test_manager() -> Arc<OpencodeManager> {
         model: String::new(),
         port: 0,
         extra_args: Vec::new(),
+        bridge_url: String::new(),
+        bridge_token: String::new(),
     })
 }
 
@@ -360,6 +362,15 @@ fn extract_text_parts_skips_non_text_parts() {
         ]
     });
     assert_eq!(extract_text_parts(&response), "one\ntwo");
+}
+
+#[test]
+fn worker_titles_are_compact() {
+    assert_eq!(crate::opencode::worker_title("  fix   the   tests  "), "fix the tests");
+    let long = crate::opencode::worker_title(&"word ".repeat(40));
+    assert!(long.ends_with('…'));
+    assert!(long.chars().count() <= 61);
+    assert_eq!(crate::opencode::worker_title("   "), "task");
 }
 
 #[test]

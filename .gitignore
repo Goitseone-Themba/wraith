@@ -3,3 +3,9 @@
 # TLS certificates (generated locally)
 *.pem
 !node_modules/**/*.pem
+
+# opencode installs plugin deps for project-local custom tools
+.opencode/node_modules
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock

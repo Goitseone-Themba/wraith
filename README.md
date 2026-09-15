@@ -70,23 +70,24 @@ sudo apt install ffmpeg
 
 ## Quick Start
 
-1. Install prerequisites above
+1. Install prerequisites above (opencode is optional; 2. below)
 2. Start LM Studio and load your preferred model (defaults to `liquid/lfm2.5-1.2b`)
-3. Generate TLS certificates:
-
-```bash
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
-```
-
-4. Run the server:
+3. Run the server:
 
 ```bash
 cargo run --release
 ```
 
-5. Open [https://localhost:2026](https://localhost:2026) in your browser (accept the self-signed certificate warning)
+TLS certificates are generated automatically on first run (stored under
+`~/.config/wraith/tls/`). To use your own, place `cert.pem` and `key.pem` in the
+project directory or point `[security] cert_path`/`key_path` at them.
 
-6. For mobile access, use `https://YOUR_IP:2026`
+4. Open [https://localhost:2026](https://localhost:2026) in your browser (accept the self-signed certificate warning)
+
+5. For mobile access, use `https://YOUR_IP:2026`
+
+6. Optional: switch the engine to **OPENCODE** in the header; if opencode is not
+   installed, the UI shows install instructions and a one-click installer.
 
 ## Directory Structure
 
@@ -136,6 +137,26 @@ With the opencode engine selected, **Voice Call** opens a WebSocket session:
 
 Headphones are recommended for true full-duplex on a laptop (browser echo
 cancellation can only do so much through speakers).
+
+#### Opt-in voice agent
+
+The **Voice Agent** button installs two managed files into the project:
+
+- `.opencode/agents/wraith-voice.md` — a voice-first agent (short spoken
+  replies, `question: allow` so it can ask clarifying questions by voice).
+- `.opencode/tools/wraith.ts` — `wraith_say` (speak a milestone mid-task) and
+  `wraith_worker` (spawn a background worker).
+
+Install/remove is loopback-only, refuses to overwrite unmanaged files, and
+detects its own `managed-by: wraith` marker.
+
+#### Background workers
+
+The **Workers** button opens a panel that spawns parallel opencode sessions
+("Worker: …") on the managed server, with live busy/idle status, abort and
+delete. Workers share the project directory; use separate git worktrees for
+file-editing work. tmux/PTY workers are a future backend for jobs that must
+outlive Wraith.
 
 ### Voice Call (Hands-Free)
 
@@ -268,6 +289,7 @@ min_recording_duration_ms = 500
 [security]
 cert_path = "cert.pem"
 key_path = "key.pem"
+auto_tls = true          # generate a self-signed cert when files are missing
 
 # opencode engine (optional). When `directory` is empty, Wraith uses its own
 # working directory. `port = 0` picks a random local port for the managed server.
@@ -301,6 +323,7 @@ the browser/frontend VAD implementation:
 | `WRAITH_VAD_MIN_RECORDING_MS` | Planned: minimum recording duration (ms); not yet hooked up to frontend VAD |
 | `WRAITH_CERT_PATH` | TLS certificate path |
 | `WRAITH_KEY_PATH` | TLS key path |
+| `WRAITH_AUTO_TLS` | Generate self-signed certificates when missing |
 | `WRAITH_OPENCODE_EXECUTABLE` | opencode executable name/path |
 | `WRAITH_OPENCODE_DIRECTORY` | Working directory for the managed opencode server |
 | `WRAITH_OPENCODE_AGENT` | Default opencode agent for Wraith sessions |

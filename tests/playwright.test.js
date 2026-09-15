@@ -1588,6 +1588,72 @@ async function testOpencodeUI() {
     page.off('dialog', dialogHandler);
     await assertTrue(deleteCalled, 'Delete session calls the DELETE endpoint');
 
+    // Background worker panel
+    let workerSpawnPayload = null;
+    await page.route('**/opencode/workers', route => {
+        if (route.request().method() === 'POST') {
+            workerSpawnPayload = JSON.parse(route.request().postData() || '{}');
+            return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, worker: { id: 'ses_worker', title: 'Worker: test task' } }) });
+        }
+        return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ workers: [{ id: 'ses_worker', title: 'Worker: test task', status: { type: 'busy' } }] })
+        });
+    });
+
+    await page.click('#btn-oc-workers');
+    await page.waitForTimeout(400);
+    await assertTrue(
+        await page.$eval('#worker-list', el => el.classList.contains('active')),
+        'Workers panel opens'
+    );
+    await assertContains(await page.$eval('#worker-list', el => el.textContent), 'test task', 'Worker entry renders');
+    await assertContains(await page.$eval('#worker-list', el => el.textContent), 'busy', 'Worker status renders');
+
+    await page.fill('#worker-prompt', 'check the docs');
+    await page.click('#btn-worker-spawn');
+    await page.waitForTimeout(400);
+    await assertTrue(
+        workerSpawnPayload && workerSpawnPayload.prompt === 'check the docs',
+        'Spawn posts the worker prompt',
+        JSON.stringify(workerSpawnPayload)
+    );
+    await page.evaluate(() => document.getElementById('worker-list').classList.remove('active'));
+    await page.unroute('**/opencode/workers');
+
+    // Project-local voice agent install
+    let agentInstallCalled = false;
+    let agentRemoveCalled = false;
+    await page.route('**/opencode/agent/status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ installed: false, agent_path: '/tmp/.opencode/agents/wraith-voice.md', tool_path: '/tmp/.opencode/tools/wraith.ts', agent_managed: false, tool_managed: false })
+    }));
+    await page.route('**/opencode/agent/install', route => {
+        agentInstallCalled = true;
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ installed: true, agent_managed: true, tool_managed: true, agent_path: '', tool_path: '' }) });
+    });
+    await page.route('**/opencode/agent/remove', route => {
+        agentRemoveCalled = true;
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ installed: false, agent_managed: false, tool_managed: false, agent_path: '', tool_path: '' }) });
+    });
+
+    await page.click('[data-engine="local"]');
+    await page.click('[data-engine="opencode"]');
+    await page.waitForTimeout(600);
+
+    const agentDialog = dialog => dialog.accept();
+    page.on('dialog', agentDialog);
+    await page.click('#btn-oc-agent');
+    await page.waitForTimeout(400);
+    page.off('dialog', agentDialog);
+    await assertTrue(agentInstallCalled, 'Voice Agent button installs project-local agent files');
+
+    await page.unroute('**/opencode/agent/status');
+    await page.unroute('**/opencode/agent/install');
+    await page.unroute('**/opencode/agent/remove');
+
     // Uninstalled state and install methods
     await page.unroute('**/opencode/status');
     await page.route('**/opencode/status', route => route.fulfill({

@@ -328,22 +328,28 @@ Measured facts: piper streams raw PCM per stdin line (first sentence ~0.6 s
 
 ### Phase 3 — conversational conductor
 
-- **P3-1** persona via prompt `system` override; **P3-2** voice Q&A polish;
-  **P3-3** opt-in `.opencode/agents/wraith-voice.md` + `wraith_say` tool with
-  preview/backup/uninstall and loopback-only endpoints; **P3-4** fast lane only
-  if measured first-audio > 2.5 s.
+- **P3-1** ✅ persona via prompt `system` override (VOICE_PERSONA).
+- **P3-2** ✅ multi-question voice answering with staged questions.
+- **P3-3** ✅ opt-in `.opencode/agents/wraith-voice.md` + `.opencode/tools/wraith.ts`
+  (`wraith_say`, `wraith_worker`), managed markers, loopback-only endpoints,
+  token-guarded `/agent/say` and `/agent/worker` bridge.
+- **P3-4** ✅ gate evaluated: warm first audio 2.14 s < 2.5 s → fast lane
+  deferred, documented.
 
 ### Phase 4 — orchestration
 
-- **P4-1** worker sessions on one server (`/opencode/workers`, `max_workers=2`),
-  UI panel + narration; **P4-2** git-worktree isolation; **P4-3** optional
-  PTY/tmux backend via `POST /pty` or tmux with orphan cleanup.
+- **P4-1** ✅ worker sessions on one server (`/opencode/workers`), Workers panel
+  (spawn/status/abort/delete/switch), `wraith_worker` tool.
+- **P4-2/3** ⬜ git-worktree isolation and PTY/tmux backend deferred; workers
+  share the project directory for now.
 
 ### Phase 5 — portability and release
 
-- **P5-1** `rcgen` auto-TLS with SANs under `~/.config/wraith/tls/`;
-  **P5-2** release profile + CI (`ci.yml`, `release.yml` musl x86_64/aarch64);
-  **P5-3** docs.
+- **P5-1** ✅ `rcgen` auto-TLS with SANs; default path `~/.config/wraith/tls/`,
+  0600 key; `auto_tls` config/env.
+- **P5-2** ✅ `.github/workflows/ci.yml` (build/test/clippy) and `release.yml`
+  (musl x86_64/aarch64 artifacts).
+- **P5-3** ✅ README/config docs and opt-in agent/worker documentation.
 
 ### Definition of done
 

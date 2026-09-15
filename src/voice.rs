@@ -50,6 +50,7 @@ impl Default for VoiceSettings {
 pub struct VoiceHub {
     metrics: Mutex<VecDeque<Value>>,
     active: Mutex<Option<(uuid::Uuid, CancellationToken)>>,
+    say_tx: Mutex<Option<mpsc::Sender<String>>>,
 }
 
 impl VoiceHub {
@@ -57,6 +58,7 @@ impl VoiceHub {
         Arc::new(Self {
             metrics: Mutex::new(VecDeque::new()),
             active: Mutex::new(None),
+            say_tx: Mutex::new(None),
         })
     }
 
@@ -77,6 +79,26 @@ impl VoiceHub {
             if *current == id {
                 *active = None;
             }
+        }
+    }
+
+    pub async fn set_say(&self, sender: mpsc::Sender<String>) {
+        *self.say_tx.lock().await = Some(sender);
+    }
+
+    pub async fn clear_say(&self) {
+        *self.say_tx.lock().await = None;
+    }
+
+    /// Speaks text through the active voice call, used by the `wraith_say` tool.
+    pub async fn say(&self, text: &str) -> Result<(), String> {
+        let guard = self.say_tx.lock().await;
+        match guard.as_ref() {
+            Some(sender) => sender
+                .send(text.to_string())
+                .await
+                .map_err(|_| "voice session unavailable".to_string()),
+            None => Err("no active voice call".to_string()),
         }
     }
 
@@ -109,6 +131,7 @@ enum Command {
     },
     Speed(f64),
     Stop,
+    Say(String),
     AudioOut(Bytes),
     Event(Value),
     EngineDone(i64),
@@ -156,6 +179,8 @@ struct Session {
     cancel: Option<CancellationToken>,
     pending_permission: Option<Value>,
     pending_question: Option<Value>,
+    question_index: usize,
+    question_answers: Vec<Vec<String>>,
     muted: bool,
     delta_parts: HashSet<String>,
     updated_parts: HashSet<String>,
@@ -198,6 +223,8 @@ impl Session {
             cancel: None,
             pending_permission: None,
             pending_question: None,
+            question_index: 0,
+            question_answers: Vec::new(),
             muted: false,
             delta_parts: HashSet::new(),
             updated_parts: HashSet::new(),
@@ -485,17 +512,33 @@ impl Session {
         }
 
         if self.state == VoiceState::AwaitingAnswer {
-            if let Some(question) = self.pending_question.take() {
+            if let Some(question) = self.pending_question.clone() {
+                let questions: Vec<Value> = question
+                    .get("questions")
+                    .and_then(|q| q.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let index = self.question_index.min(questions.len().saturating_sub(1));
+                let answer = questions
+                    .get(index)
+                    .map(|q| match_question_answer(q, &trimmed))
+                    .unwrap_or_else(|| vec![trimmed.clone()]);
+                self.question_answers.push(answer);
+
+                if self.question_index + 1 < questions.len() {
+                    self.question_index += 1;
+                    self.speak_next_question(sink).await;
+                    return;
+                }
+
                 let request_id = question
                     .get("id")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
-                let answer = match_question_answer(&question, &trimmed);
-                let _ = self
-                    .manager
-                    .reply_question(&request_id, vec![answer])
-                    .await;
+                let answers = std::mem::take(&mut self.question_answers);
+                let _ = self.manager.reply_question(&request_id, answers).await;
+                self.pending_question = None;
                 Self::send(sink, json!({ "type": "question_reply", "id": request_id })).await;
                 self.state = VoiceState::Working;
                 self.send_state(sink).await;
@@ -540,6 +583,37 @@ impl Session {
             cancel.cancel();
         }
         self.generation += 1;
+    }
+
+    async fn speak_next_question(&mut self, sink: &mut WsSink) {
+        let Some(request) = self.pending_question.clone() else {
+            return;
+        };
+        let questions = request
+            .get("questions")
+            .and_then(|q| q.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let Some(question) = questions.get(self.question_index) else {
+            return;
+        };
+
+        let text = question
+            .get("question")
+            .and_then(|t| t.as_str())
+            .unwrap_or("a question");
+        self.speak(text, sink).await;
+
+        if let Some(options) = question.get("options").and_then(|o| o.as_array()) {
+            let labels: Vec<&str> = options
+                .iter()
+                .filter_map(|option| option.get("label").and_then(|l| l.as_str()))
+                .collect();
+            if !labels.is_empty() {
+                self.speak(&format!("Options: {}.", labels.join(", ")), sink)
+                    .await;
+            }
+        }
     }
 
     async fn handle_spoken_text(&mut self, text: &str, sink: &mut WsSink) {
@@ -702,27 +776,9 @@ impl Session {
             }
             "question.asked" | "question.v2.asked" => {
                 self.pending_question = Some(properties.clone());
-                let question = properties
-                    .get("questions")
-                    .and_then(|q| q.as_array())
-                    .and_then(|q| q.first())
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let text = question
-                    .get("question")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("a question");
-                self.speak(text, sink).await;
-                if let Some(options) = question.get("options").and_then(|o| o.as_array()) {
-                    let labels: Vec<&str> = options
-                        .iter()
-                        .filter_map(|option| option.get("label").and_then(|l| l.as_str()))
-                        .collect();
-                    if !labels.is_empty() {
-                        self.speak(&format!("Options: {}.", labels.join(", ")), sink)
-                            .await;
-                    }
-                }
+                self.question_index = 0;
+                self.question_answers.clear();
+                self.speak_next_question(sink).await;
                 Self::send(sink, json!({ "type": "question", "question": properties })).await;
                 self.state = VoiceState::AwaitingAnswer;
                 self.send_state(sink).await;
@@ -896,6 +952,9 @@ impl Session {
             Command::Stop => {
                 self.stop_requested = true;
             }
+            Command::Say(text) => {
+                self.speak(&text, sink).await;
+            }
             Command::AudioOut(chunk) => {
                 self.last_audio_at = Instant::now();
                 self.audio_since_sentence = true;
@@ -941,6 +1000,28 @@ pub async fn run_voice_socket(
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(256);
     let closed = CancellationToken::new();
     let (hub_id, hub_token) = hub.register().await;
+
+    let (say_tx, mut say_rx) = mpsc::channel::<String>(16);
+    hub.set_say(say_tx).await;
+    {
+        let cmd_tx = cmd_tx.clone();
+        let closed = closed.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = closed.cancelled() => break,
+                    text = say_rx.recv() => match text {
+                        Some(text) => {
+                            if cmd_tx.send(Command::Say(text)).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        });
+    }
 
     {
         let cmd_tx = cmd_tx.clone();
@@ -1029,6 +1110,7 @@ pub async fn run_voice_socket(
 
     closed.cancel();
     session.shutdown().await;
+    hub.clear_say().await;
     hub.unregister(hub_id).await;
 }
 
@@ -1056,12 +1138,7 @@ pub fn match_permission_answer(text: &str) -> Option<(&'static str, bool)> {
 
 pub fn match_question_answer(question: &Value, text: &str) -> Vec<String> {
     let normalized = text.to_lowercase();
-    let options = question
-        .get("questions")
-        .and_then(|q| q.as_array())
-        .and_then(|q| q.first())
-        .and_then(|q| q.get("options"))
-        .and_then(|o| o.as_array());
+    let options = question.get("options").and_then(|o| o.as_array());
 
     if let Some(options) = options {
         let matches: Vec<String> = options
