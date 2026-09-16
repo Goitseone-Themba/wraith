@@ -93,11 +93,21 @@ project directory or point `[security] cert_path`/`key_path` at them.
 
 ```
 wraith/
-├── Cargo.toml          # Rust package config
-├── README.md           # This file
+├── Cargo.toml              # Rust package config
+├── README.md               # This file
+├── .wraith.toml.example    # Config template
+├── tests/playwright.test.js
 └── src/
-    ├── main.rs         # Server logic (Axum routes, STT/LLM/TTS integration)
-    └── index.html      # Browser WebUI
+    ├── main.rs             # Server, routes, config
+    ├── index.html          # Browser WebUI
+    ├── opencode.rs         # Managed opencode serve (HTTP + SSE)
+    ├── voice.rs            # Streaming voice call
+    ├── speech.rs           # TTS (piper)
+    ├── stt.rs              # STT (voxtype)
+    ├── agent.rs            # Voice agent install + workers
+    ├── tools.rs            # Tool / permission helpers
+    ├── tls.rs              # Auto self-signed TLS
+    └── tests.rs            # Unit tests
 ```
 
 ## Usage Modes
